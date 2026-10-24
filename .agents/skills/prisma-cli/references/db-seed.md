@@ -59,8 +59,9 @@ seed: 'node prisma/seed.js'
 ```typescript
 // prisma/seed.ts
 import { PrismaClient } from '../generated/client'
-
-const prisma = new PrismaClient()
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+export const prisma = new PrismaClient({ adapter });
 
 async function main() {
   // Create users

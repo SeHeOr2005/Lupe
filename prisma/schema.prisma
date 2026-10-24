@@ -1,7 +1,13 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// Lupe · Modelo de datos v2 (PostgreSQL) — Fundación Asisco Up
+// Traducido desde "Lupe_Dbv2.drawio". Cambios frente a v1 (ver README § Historial del modelo):
+//   - fuentes.modo gana el valor "api" (datos.gov.co / SECOP II por datos abiertos).
+//   - convocatorias gana numero_proceso y pierde documentos_requeridos (ahora es relacional:
+//     convocatoria_documentos + documentos_fundacion) y aprobada_por.
+//   - Se quitan usuarios_telegram, chat_messages y desembolsos: ya no se guarda qué persona
+//     exacta hizo cada acción (radicada_por, registrado_por, completado_por, aprobada_por);
+//     convocatoria_eventos.origen ("sistema" | "usuaria") basta para auditar.
+//   - adjudicaciones gana monto_recibido (antes vivía en desembolsos) para poder calcular
+//     saldo_por_recibir en la vista de finanzas sin esa tabla.
 
 generator client {
   provider = "prisma-client"
@@ -10,4 +16,292 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Enums
+// ──────────────────────────────────────────────────────────────────────────
+
+enum ModoFuente {
+  api
+  pagina_unica
+  exploracion
+
+  @@map("modo_fuente")
+}
+
+enum EstadoEscaneo {
+  ok
+  sin_cambios
+  error
+
+  @@map("estado_escaneo")
+}
+
+/// Ciclo de vida de una convocatoria (10 valores, ver "05 · Ciclo de vida")
+enum EstadoConvocatoria {
+  detectada
+  pendiente_aprobacion
+  aprobada
+  en_postulacion
+  postulada
+  ganada
+  no_ganada
+  no_apta
+  descartada
+  vencida
+
+  @@map("estado_convocatoria")
+}
+
+/// Quién disparó un cambio de estado: la tarea/bot automático, o Consuelo (y el equipo) en Telegram.
+enum OrigenEvento {
+  sistema
+  usuaria
+
+  @@map("origen_evento")
+}
+
+enum EstadoResultado {
+  pendiente
+  ganada
+  no_ganada
+
+  @@map("estado_resultado")
+}
+
+/// Tipo de documento soporte que una entidad suele pedir (RUT, cert. existencia, cédula rep. legal...).
+enum TipoDocumento {
+  rut
+  certificado_existencia_representacion
+  cedula_representante_legal
+  certificado_antecedentes_fiscales
+  certificado_antecedentes_disciplinarios
+  certificado_antecedentes_judiciales
+  estados_financieros
+  hoja_vida_entidad
+  otro
+
+  @@map("tipo_documento")
+}
+
+/// Estado del documento requerido por una convocatoria puntual.
+enum EstadoDocumentoConvocatoria {
+  pendiente
+  listo
+  no_aplica
+
+  @@map("estado_documento_convocatoria")
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Soporte: hace posible el flujo
+// ──────────────────────────────────────────────────────────────────────────
+
+model Fuente {
+  id                 String     @id @default(uuid()) @db.Uuid
+  nombre             String
+  urlBase            String     @map("url_base")
+  modo               ModoFuente
+  dominiosPermitidos String[]   @map("dominios_permitidos")
+  maxPaginas         Int        @default(10) @map("max_paginas") @db.SmallInt
+  /// Expresión cron (5 campos, hora America/Bogota) que dispara el escaneo. Ej: "0 7 * * *".
+  cron               String
+  activa             Boolean    @default(true)
+  hashContenido      String?    @map("hash_contenido")
+  ultimoEscaneoAt    DateTime?  @map("ultimo_escaneo_at") @db.Timestamptz(6)
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  convocatorias Convocatoria[]
+  escaneos      Escaneo[]
+
+  @@map("fuentes")
+}
+
+model Escaneo {
+  id                  BigInt        @id @default(autoincrement())
+  fuenteId            String        @map("fuente_id") @db.Uuid
+  inicioAt            DateTime      @map("inicio_at") @db.Timestamptz(6)
+  finAt               DateTime?     @map("fin_at") @db.Timestamptz(6)
+  estado              EstadoEscaneo
+  paginasVisitadas    Int           @default(0) @map("paginas_visitadas")
+  convocatoriasNuevas Int           @default(0) @map("convocatorias_nuevas")
+  tokensUsados        Int           @default(0) @map("tokens_usados")
+  error               String?
+
+  fuente Fuente @relation(fields: [fuenteId], references: [id], onDelete: Cascade)
+
+  @@index([fuenteId])
+  @@map("escaneos")
+}
+
+model Recordatorio {
+  id             BigInt    @id @default(autoincrement())
+  convocatoriaId String    @map("convocatoria_id") @db.Uuid
+  diasAntes      Int       @map("dias_antes") @db.SmallInt
+  enviadoAt      DateTime? @map("enviado_at") @db.Timestamptz(6)
+
+  convocatoria Convocatoria @relation(fields: [convocatoriaId], references: [id], onDelete: Cascade)
+
+  @@unique([convocatoriaId, diasAntes])
+  @@map("recordatorios")
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Documentos: carpeta digital de la fundación
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Documentos de la fundación en sí (RUT, certificados...), reutilizables entre convocatorias.
+model DocumentoFundacion {
+  id                String        @id @default(uuid()) @db.Uuid
+  tipo              TipoDocumento
+  nombre            String
+  fechaExpedicion   DateTime?     @map("fecha_expedicion") @db.Date
+  fechaVencimiento  DateTime?     @map("fecha_vencimiento") @db.Date
+  /// file_id de Telegram, para volver a enviarlo sin pedirlo de nuevo.
+  telegramFileId    String?       @map("telegram_file_id")
+  urlArchivo        String?       @map("url_archivo")
+  notas             String?
+
+  requeridoEn ConvocatoriaDocumento[]
+
+  @@index([tipo])
+  @@map("documentos_fundacion")
+}
+
+/// Qué documento pide cada convocatoria puntual, y si ya está listo.
+model ConvocatoriaDocumento {
+  id             String                      @id @default(uuid()) @db.Uuid
+  convocatoriaId String                      @map("convocatoria_id") @db.Uuid
+  tipo           TipoDocumento
+  descripcion    String?
+  estado         EstadoDocumentoConvocatoria @default(pendiente)
+  documentoId    String?                     @map("documento_id") @db.Uuid
+
+  convocatoria Convocatoria        @relation(fields: [convocatoriaId], references: [id], onDelete: Cascade)
+  documento    DocumentoFundacion? @relation(fields: [documentoId], references: [id])
+
+  @@unique([convocatoriaId, tipo])
+  @@map("convocatoria_documentos")
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Núcleo: lo que pidió el equipo
+// ──────────────────────────────────────────────────────────────────────────
+
+model Convocatoria {
+  id                     String             @id @default(uuid()) @db.Uuid
+  fuenteId               String             @map("fuente_id") @db.Uuid
+  huella                 String             @unique
+  /// Número de proceso en SECOP u otra plataforma, cuando aplica.
+  numeroProceso          String?            @map("numero_proceso")
+  titulo                 String
+  entidad                String
+  urlOrigen              String             @map("url_origen")
+  resumen                String?
+  fechaApertura          DateTime?          @map("fecha_apertura") @db.Date
+  fechaCierre            DateTime?          @map("fecha_cierre") @db.Timestamptz(6)
+  fechaResultadoEstimada DateTime?          @map("fecha_resultado_estimada") @db.Date
+  montoMaximo            Decimal?           @map("monto_maximo") @db.Decimal(14, 2)
+  requisitos             Json?
+  analisisIa             Json?              @map("analisis_ia")
+  estado                 EstadoConvocatoria @default(detectada)
+  aprobadaAt             DateTime?          @map("aprobada_at") @db.Timestamptz(6)
+  createdAt              DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  fuente        Fuente                  @relation(fields: [fuenteId], references: [id], onDelete: Restrict)
+  pasos         ConvocatoriaPaso[]
+  documentos    ConvocatoriaDocumento[]
+  eventos       ConvocatoriaEvento[]
+  recordatorios Recordatorio[]
+  postulacion   Postulacion?
+
+  @@index([estado])
+  @@index([fechaCierre])
+  @@map("convocatorias")
+}
+
+model ConvocatoriaPaso {
+  id             String    @id @default(uuid()) @db.Uuid
+  convocatoriaId String    @map("convocatoria_id") @db.Uuid
+  orden          Int       @db.SmallInt
+  titulo         String
+  descripcion    String?
+  urlReferencia  String?   @map("url_referencia")
+  completado     Boolean   @default(false)
+  completadoAt   DateTime? @map("completado_at") @db.Timestamptz(6)
+
+  convocatoria Convocatoria @relation(fields: [convocatoriaId], references: [id], onDelete: Cascade)
+
+  @@unique([convocatoriaId, orden])
+  @@map("convocatoria_pasos")
+}
+
+model ConvocatoriaEvento {
+  id             BigInt              @id @default(autoincrement())
+  convocatoriaId String              @map("convocatoria_id") @db.Uuid
+  estadoAnterior EstadoConvocatoria? @map("estado_anterior")
+  estadoNuevo    EstadoConvocatoria  @map("estado_nuevo")
+  /// "sistema" (cron, agente, tarea) o "usuaria" (Consuelo/equipo por Telegram).
+  origen         OrigenEvento
+  nota           String?
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  convocatoria Convocatoria @relation(fields: [convocatoriaId], references: [id], onDelete: Cascade)
+
+  @@index([convocatoriaId])
+  @@map("convocatoria_eventos")
+}
+
+model Postulacion {
+  id              String   @id @default(uuid()) @db.Uuid
+  convocatoriaId  String   @unique @map("convocatoria_id") @db.Uuid
+  fechaRadicacion DateTime @map("fecha_radicacion") @db.Date
+  numeroRadicado  String?  @map("numero_radicado")
+  notas           String?
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Restrict, no Cascade: el dinero no se borra por accidente al borrar la convocatoria
+  // (ver "Sin borrados en cascada de dinero" en el documento de diseño).
+  convocatoria Convocatoria @relation(fields: [convocatoriaId], references: [id], onDelete: Restrict)
+  resultado    Resultado?
+
+  @@map("postulaciones")
+}
+
+model Resultado {
+  id             String          @id @default(uuid()) @db.Uuid
+  postulacionId  String          @unique @map("postulacion_id") @db.Uuid
+  estado         EstadoResultado @default(pendiente)
+  fechaResultado DateTime?       @map("fecha_resultado") @db.Date
+  observaciones  String?
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  postulacion  Postulacion   @relation(fields: [postulacionId], references: [id], onDelete: Restrict)
+  adjudicacion Adjudicacion?
+
+  // Soporta la FK compuesta (resultado_id, resultado_estado) desde adjudicaciones:
+  // una adjudicación solo puede apuntar a un resultado en estado 'ganada'.
+  @@unique([id, estado])
+  @@map("resultados")
+}
+
+model Adjudicacion {
+  id                String          @id @default(uuid()) @db.Uuid
+  resultadoId       String          @map("resultado_id") @db.Uuid
+  resultadoEstado   EstadoResultado @default(ganada) @map("resultado_estado")
+  montoAdjudicado   Decimal         @map("monto_adjudicado") @db.Decimal(14, 2)
+  montoRecibido     Decimal         @default(0) @map("monto_recibido") @db.Decimal(14, 2)
+  moneda            String          @default("COP") @db.Char(3)
+  fechaAdjudicacion DateTime?       @map("fecha_adjudicacion") @db.Date
+  entidadOtorgante  String?         @map("entidad_otorgante")
+  referenciaActo    String?         @map("referencia_acto")
+  observaciones     String?
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  resultado Resultado @relation(fields: [resultadoId, resultadoEstado], references: [id, estado], onDelete: Restrict)
+
+  @@unique([resultadoId, resultadoEstado])
+  @@map("adjudicaciones")
 }
