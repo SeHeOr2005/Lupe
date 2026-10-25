@@ -1,4 +1,10 @@
 import { z } from "zod";
+import type { Prisma } from "../generated/prisma/client.js";
+
+/** Cualquier valor JSON válido para una columna `Json` de Prisma (null solo anidado). */
+const jsonValue: z.ZodType<Prisma.InputJsonValue> = z.lazy(() =>
+  z.union([z.string(), z.number(), z.boolean(), z.array(jsonValue.nullable()), z.record(jsonValue.nullable())]),
+);
 
 /** Las 10 posiciones del ciclo de vida (ver "05 · Ciclo de vida"). */
 export const estadoConvocatoria = z.enum([
@@ -26,8 +32,8 @@ export const createConvocatoriaSchema = z.object({
   fechaCierre: z.coerce.date().optional(),
   fechaResultadoEstimada: z.coerce.date().optional(),
   montoMaximo: z.coerce.number().positive().optional(),
-  requisitos: z.unknown().optional(),
-  analisisIa: z.unknown().optional(),
+  requisitos: jsonValue.optional(),
+  analisisIa: jsonValue.optional(),
   // `estado` se maneja a través de POST /convocatorias/:id/transiciones,
   // nunca con un PATCH libre (ver services/convocatorias.ts).
 });

@@ -13,39 +13,15 @@
  */
 import { prisma } from "../db/prisma.js";
 import { ConflictError, NotFoundError } from "../http/errors.js";
-import type { Prisma } from "../../generated/prisma/client.js";
+import type { Prisma } from "../generated/prisma/client.js";
+import {
+  esTransicionPermitida,
+  transicionesDesde,
+  type EstadoConvocatoria,
+  type OrigenEvento,
+} from "./transiciones.js";
 
-export type EstadoConvocatoria =
-  | "detectada"
-  | "pendiente_aprobacion"
-  | "aprobada"
-  | "en_postulacion"
-  | "postulada"
-  | "ganada"
-  | "no_ganada"
-  | "no_apta"
-  | "descartada"
-  | "vencida";
-
-export type OrigenEvento = "sistema" | "usuaria";
-
-/** Tabla "Transiciones permitidas" del documento de diseño (05 · Ciclo de vida). */
-const TRANSICIONES_PERMITIDAS: Record<EstadoConvocatoria, EstadoConvocatoria[]> = {
-  detectada: ["pendiente_aprobacion"],
-  pendiente_aprobacion: ["aprobada", "descartada", "vencida"],
-  aprobada: ["en_postulacion", "vencida"],
-  en_postulacion: ["postulada", "vencida"],
-  postulada: ["ganada", "no_ganada"],
-  ganada: [],
-  no_ganada: [],
-  no_apta: [],
-  descartada: [],
-  vencida: [],
-};
-
-export function transicionesDesde(estado: EstadoConvocatoria): EstadoConvocatoria[] {
-  return TRANSICIONES_PERMITIDAS[estado];
-}
+export { transicionesDesde, type EstadoConvocatoria, type OrigenEvento };
 
 interface TransicionOptions {
   origen: OrigenEvento;
@@ -67,8 +43,8 @@ export async function transicionarConvocatoria(
     const actual = await tx.convocatoria.findUnique({ where: { id: convocatoriaId } });
     if (!actual) throw new NotFoundError("convocatoria", convocatoriaId);
 
-    const permitidas = TRANSICIONES_PERMITIDAS[actual.estado as EstadoConvocatoria];
-    if (!permitidas.includes(nuevoEstado)) {
+    const permitidas = transicionesDesde(actual.estado as EstadoConvocatoria);
+    if (!esTransicionPermitida(actual.estado as EstadoConvocatoria, nuevoEstado)) {
       throw new ConflictError(
         `Transición no permitida: "${actual.estado}" → "${nuevoEstado}". ` +
           `Desde "${actual.estado}" solo se permite: ${permitidas.join(", ") || "(ninguna, es un estado final)"}.`,
@@ -188,8 +164,7 @@ export async function radicarPostulacion(input: RadicarPostulacionInput) {
     const convocatoria = await tx.convocatoria.findUnique({ where: { id: input.convocatoriaId } });
     if (!convocatoria) throw new NotFoundError("convocatoria", input.convocatoriaId);
 
-    const permitidas = TRANSICIONES_PERMITIDAS[convocatoria.estado as EstadoConvocatoria];
-    if (!permitidas.includes("postulada")) {
+    if (!esTransicionPermitida(convocatoria.estado as EstadoConvocatoria, "postulada")) {
       throw new ConflictError(
         `No se puede radicar: la convocatoria está en "${convocatoria.estado}", no en "en_postulacion".`,
       );
