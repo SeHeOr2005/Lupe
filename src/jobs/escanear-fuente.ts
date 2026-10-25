@@ -6,25 +6,18 @@
  * modelo, pero no se comparan carácter a carácter contra la página (ver
  * README § Pendiente).
  */
-import { createHash } from "node:crypto";
 import { prisma } from "../db/prisma.js";
+import { env } from "../config/env.js";
 import { fetchHtml, fetchJsonApi } from "../scraping/fetchers.js";
-import { evaluarPaginaUnica, type Candidato } from "../ai/gemini.js";
+import { mapearRespuestaSecop } from "../scraping/secop.js";
+import { evaluarPaginaUnica } from "../ai/gemini.js";
 import { transicionarConvocatoria } from "../services/convocatorias.js";
+import { calcularHuella, type Hallazgo } from "./hallazgo.js";
 
-function normalizarTitulo(titulo: string): string {
-  return titulo
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "") // quita tildes
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-/** "La huella combina entidad, título normalizado y fecha de cierre" (doc 06 · Modelo de datos). */
-function calcularHuella(entidad: string, titulo: string, fechaCierre?: string): string {
-  const base = `${entidad.toLowerCase().trim()}|${normalizarTitulo(titulo)}|${fechaCierre ?? ""}`;
-  return createHash("sha256").update(base).digest("hex");
+/** Lo que devuelve cada modo de escaneo cuando hubo contenido nuevo. */
+interface Extraccion {
+  hallazgos: Hallazgo[];
+  tokensUsados: number;
 }
 
 export interface ResultadoEscaneo {
@@ -49,12 +42,12 @@ export async function escanearFuente(fuenteId: string): Promise<ResultadoEscaneo
       throw new Error('modo "exploracion" todavía no está implementado (ver README § Pendiente).');
     }
 
-    const candidatos: Candidato[] | typeof SIN_CAMBIOS =
+    const extraccion: Extraccion | typeof SIN_CAMBIOS =
       fuente.modo === "api"
         ? await escanearComoApi(fuente.urlBase)
         : await escanearComoPaginaUnica(fuenteId, fuente.urlBase, fuente.nombre, fuente.hashContenido);
 
-    if (candidatos === SIN_CAMBIOS) {
+    if (extraccion === SIN_CAMBIOS) {
       await registrarEscaneo({
         fuenteId,
         inicioAt,
@@ -68,8 +61,8 @@ export async function escanearFuente(fuenteId: string): Promise<ResultadoEscaneo
     }
 
     let nuevas = 0;
-    for (const candidato of candidatos) {
-      const creada = await registrarHallazgo(fuenteId, candidato);
+    for (const hallazgo of extraccion.hallazgos) {
+      const creada = await registrarHallazgo(fuenteId, hallazgo);
       if (creada) nuevas += 1;
     }
 
@@ -82,7 +75,7 @@ export async function escanearFuente(fuenteId: string): Promise<ResultadoEscaneo
       estado: "ok",
       paginasVisitadas: 1,
       convocatoriasNuevas: nuevas,
-      tokensUsados: 0,
+      tokensUsados: extraccion.tokensUsados,
     };
     await registrarEscaneo({ fuenteId, inicioAt, ...resultado });
     return resultado;
@@ -108,36 +101,42 @@ async function escanearComoPaginaUnica(
   url: string,
   nombreFuente: string,
   hashAnterior: string | null,
-): Promise<Candidato[] | typeof SIN_CAMBIOS> {
+): Promise<Extraccion | typeof SIN_CAMBIOS> {
   const { texto, hash } = await fetchHtml(url);
   if (hashAnterior && hash === hashAnterior) return SIN_CAMBIOS;
 
-  const { candidatos } = await evaluarPaginaUnica(texto, nombreFuente);
+  // Se revisa justo antes de gastar IA, no antes de descargar: si la página no
+  // cambió, el escaneo sigue sirviendo aunque ya no quede cupo.
+  const usadosHoy = await tokensUsadosHoy();
+  if (usadosHoy >= env.MAX_TOKENS_DIA) {
+    throw new Error(`Se alcanzó MAX_TOKENS_DIA (${usadosHoy}/${env.MAX_TOKENS_DIA}); se reintenta mañana.`);
+  }
+
+  const { candidatos, tokensUsados } = await evaluarPaginaUnica(texto, nombreFuente);
   await prisma.fuente.update({ where: { id: fuenteId }, data: { hashContenido: hash } });
-  return candidatos;
+  return { hallazgos: candidatos, tokensUsados };
 }
 
-/** Datos abiertos (SECOP II vía datos.gov.co, etc.): ya viene estructurado, casi sin IA. */
-async function escanearComoApi(url: string): Promise<Candidato[]> {
-  const { data } = await fetchJsonApi(url);
-  if (!Array.isArray(data)) return [];
-
-  // Mapeo best-effort a nuestro shape; cada fuente de datos abiertos tiene sus propias
-  // columnas, así que esto se ajusta por fuente cuando se conecte la primera real (SECOP II).
-  return data.slice(0, 50).map((row): Candidato => {
-    const r = row as Record<string, unknown>;
-    return {
-      titulo: String(r["nombre_del_procedimiento"] ?? r["titulo"] ?? "Sin título"),
-      entidad: String(r["entidad"] ?? r["nombre_entidad"] ?? "Entidad sin identificar"),
-      numeroProceso: r["id_del_proceso"] ? String(r["id_del_proceso"]) : undefined,
-      fechaCierre: r["fecha_de_fin_del_proceso"] ? String(r["fecha_de_fin_del_proceso"]) : undefined,
-    };
+/** Suma de tokens de IA gastados desde la medianoche (hora de TZ, America/Bogota). */
+async function tokensUsadosHoy(): Promise<number> {
+  const inicioDelDia = new Date();
+  inicioDelDia.setHours(0, 0, 0, 0);
+  const { _sum } = await prisma.escaneo.aggregate({
+    where: { inicioAt: { gte: inicioDelDia } },
+    _sum: { tokensUsados: true },
   });
+  return _sum.tokensUsados ?? 0;
+}
+
+/** Datos abiertos (SECOP II): ya viene estructurado, no gasta IA. Ver scraping/secop.ts. */
+async function escanearComoApi(url: string): Promise<Extraccion> {
+  const { data } = await fetchJsonApi(url);
+  return { hallazgos: mapearRespuestaSecop(data), tokensUsados: 0 };
 }
 
 /** Crea la convocatoria si su huella no existe, y la mueve a pendiente_aprobacion. */
-async function registrarHallazgo(fuenteId: string, candidato: Candidato): Promise<boolean> {
-  const huella = calcularHuella(candidato.entidad, candidato.titulo, candidato.fechaCierre);
+async function registrarHallazgo(fuenteId: string, candidato: Hallazgo): Promise<boolean> {
+  const huella = calcularHuella(candidato);
 
   const existente = await prisma.convocatoria.findUnique({ where: { huella } });
   if (existente) return false; // deduplicación: ya la teníamos, no se duplica
@@ -149,7 +148,8 @@ async function registrarHallazgo(fuenteId: string, candidato: Candidato): Promis
       titulo: candidato.titulo,
       entidad: candidato.entidad,
       numeroProceso: candidato.numeroProceso,
-      urlOrigen: "", // se completa cuando se construye la URL de detalle (fase "explorador")
+      // En modo api viene de la fuente; en pagina_unica se completa en la fase "explorador".
+      urlOrigen: candidato.urlOrigen ?? "",
       resumen: candidato.resumen,
       fechaApertura: candidato.fechaApertura ? new Date(candidato.fechaApertura) : undefined,
       fechaCierre: candidato.fechaCierre ? new Date(candidato.fechaCierre) : undefined,
