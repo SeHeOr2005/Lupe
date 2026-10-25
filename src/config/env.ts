@@ -15,6 +15,10 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().min(1, "DATABASE_URL es obligatorio"),
 
+  /// Clave que toda petición a la API debe mandar en `x-api-key` (o `Authorization: Bearer`).
+  /// Obligatoria en producción; en desarrollo, si falta, la API queda abierta con un aviso.
+  API_KEY: optional(z.string().min(32, "API_KEY debe tener al menos 32 caracteres")),
+
   // Telegram (bot web + webhook)
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
@@ -49,6 +53,9 @@ const envSchema = z.object({
   SCHEDULER_TICK_MS: z.coerce.number().int().positive().default(60_000),
 
   TZ: z.string().default("America/Bogota"),
+}).refine((e) => e.NODE_ENV !== "production" || e.API_KEY, {
+  message: "API_KEY es obligatoria en producción",
+  path: ["API_KEY"],
 });
 
 const parsed = envSchema.safeParse(process.env);

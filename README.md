@@ -18,7 +18,7 @@ vs. NestJS" y "Modelo de IA" más abajo.
 ```bash
 npm install
 cp .env.example .env     # completa DATABASE_URL, TELEGRAM_BOT_TOKEN, GEMINI_API_KEY
-npx prisma generate      # genera el client en generated/prisma
+npx prisma generate      # genera el client en src/generated/prisma
 npx prisma migrate dev --name init   # crea las tablas
 psql "$DATABASE_URL" -f prisma/views/vw_finanzas_convocatorias.sql  # crea la vista de finanzas
 
@@ -28,7 +28,7 @@ npm run worker    # trigger de fuentes + tarea de vencimiento (otra terminal)
 
 > ⚠️ Este sandbox no tiene salida de red hacia `binaries.prisma.sh`, así que
 > no pude ejecutar `prisma generate`/`migrate` aquí. `tsc --noEmit` compila
-> limpio salvo los imports a `generated/prisma/client.js` (que aparecen una
+> limpio salvo los imports a `src/generated/prisma/client.js` (que aparecen una
 > vez corras `prisma generate` localmente). Corre esos comandos en tu
 > máquina o en CI antes de `npm run dev` / `npm run worker`.
 
@@ -185,6 +185,11 @@ src/
 ```
 
 ## Endpoints
+
+Toda petición (salvo `GET /health`) lleva la clave de `API_KEY` en el header
+`x-api-key` (o `Authorization: Bearer <clave>`); sin ella la API responde 401.
+`API_KEY` es obligatoria en producción; en desarrollo, si falta, la API queda
+abierta y lo avisa en el log.
 
 CRUD estándar (`GET /recurso`, `GET /recurso/:id`, `POST`, `PATCH /:id`,
 `DELETE /:id`, con `?take=&skip=` para paginar):

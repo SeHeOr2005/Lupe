@@ -3,6 +3,7 @@ import sensible from "@fastify/sensible";
 import { ZodError } from "zod";
 import { env } from "../config/env.js";
 import { HttpError } from "./errors.js";
+import { registerApiKeyAuth } from "./auth.js";
 import { registerFuentesRoutes } from "./routes/fuentes.js";
 import { registerConvocatoriasRoutes } from "./routes/convocatorias.js";
 import { registerPostulacionesRoutes } from "./routes/postulaciones.js";
@@ -17,10 +18,11 @@ export function buildServer() {
     logger:
       env.NODE_ENV === "development"
         ? { transport: { target: "pino-pretty", options: { colorize: true } } }
-        : true,
+        : env.NODE_ENV !== "test",
   });
 
   app.register(sensible);
+  registerApiKeyAuth(app, env.API_KEY);
 
   app.get("/health", async () => ({ status: "ok", env: env.NODE_ENV }));
 
