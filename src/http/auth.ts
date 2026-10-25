@@ -2,8 +2,11 @@ import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { HttpError } from "./errors.js";
 
-/** Rutas que no piden clave (monitoreo del hosting). */
-const RUTAS_PUBLICAS = new Set(["/health"]);
+/**
+ * Rutas que no piden clave: el monitoreo del hosting y el webhook de Telegram
+ * (ese lo protege su propio secreto, TELEGRAM_WEBHOOK_SECRET, que valida grammY).
+ */
+const RUTAS_PUBLICAS = new Set(["/health", "/telegram/webhook"]);
 
 function claveDeLaPeticion(request: FastifyRequest): string | undefined {
   const header = request.headers["x-api-key"];
