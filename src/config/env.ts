@@ -31,8 +31,8 @@ const envSchema = z.object({
   // contexto largo para leer páginas/PDF de convocatorias). Ver README § Modelo de IA.
   IA_PROVIDER: z.enum(["gemini", "groq", "openrouter", "cerebras"]).default("gemini"),
   GEMINI_API_KEY: z.string().optional(),
-  MODELO_EVALUADOR: z.string().default("gemini-2.5-flash-lite"),
-  MODELO_EXPLORADOR: z.string().default("gemini-2.5-flash"),
+  MODELO_EVALUADOR: z.string().default("gemini-3.5-flash-lite"),
+  MODELO_EXPLORADOR: z.string().default("gemini-3.5-flash"),
   MAX_TOKENS_DIA: z.coerce.number().int().positive().default(2_000_000),
 
   // Plan B si Gemini se queda sin cupo (ver README § Alternativas). No se usan a menos
