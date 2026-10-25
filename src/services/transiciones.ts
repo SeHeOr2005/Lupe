@@ -20,13 +20,17 @@ export type OrigenEvento = "sistema" | "usuaria";
 
 const TRANSICIONES_PERMITIDAS: Record<EstadoConvocatoria, EstadoConvocatoria[]> = {
   detectada: ["pendiente_aprobacion"],
-  pendiente_aprobacion: ["aprobada", "descartada", "vencida"],
+  // no_apta desde aquí: al re-evaluar contra el perfil de la fundación (npm run
+  // elegibilidad:reevaluar) lo que ya estaba esperando aprobación y no encaja.
+  pendiente_aprobacion: ["aprobada", "descartada", "vencida", "no_apta"],
   aprobada: ["en_postulacion", "vencida"],
   en_postulacion: ["postulada", "vencida"],
   postulada: ["ganada", "no_ganada"],
   ganada: [],
   no_ganada: [],
-  no_apta: [],
+  // Al re-evaluar con un perfil o criterio nuevo, lo que el filtro había ocultado
+  // puede volver a la bandeja de la directora (nunca lo que ella misma descartó).
+  no_apta: ["pendiente_aprobacion"],
   descartada: [],
   vencida: [],
 };

@@ -26,12 +26,22 @@ describe("ciclo de vida de una convocatoria", () => {
     expect(esTransicionPermitida("aprobada", "descartada")).toBe(false);
   });
 
+  it("solo lo que espera aprobación puede re-evaluarse como no_apta", () => {
+    expect(esTransicionPermitida("pendiente_aprobacion", "no_apta")).toBe(true);
+    expect(esTransicionPermitida("aprobada", "no_apta")).toBe(false);
+  });
+
   it("una convocatoria ya postulada no puede vencer, solo esperar resultado", () => {
     expect(transicionesDesde("postulada")).toEqual(["ganada", "no_ganada"]);
   });
 
+  it("lo que ocultó el filtro puede volver a pendientes, lo que descartó la directora no", () => {
+    expect(transicionesDesde("no_apta")).toEqual(["pendiente_aprobacion"]);
+    expect(transicionesDesde("descartada")).toEqual([]);
+  });
+
   it("los estados finales no tienen salida", () => {
-    for (const final of ["ganada", "no_ganada", "no_apta", "descartada", "vencida"] as const) {
+    for (const final of ["ganada", "no_ganada", "descartada", "vencida"] as const) {
       expect(transicionesDesde(final)).toEqual([]);
     }
   });

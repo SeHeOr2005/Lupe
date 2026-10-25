@@ -13,6 +13,7 @@ import { mapearRespuestaSecop } from "../scraping/secop.js";
 import { evaluarPaginaUnica } from "../ai/gemini.js";
 import { transicionarConvocatoria } from "../services/convocatorias.js";
 import { calcularHuella, type Hallazgo } from "./hallazgo.js";
+import { elegibilidadComoJson, evaluarLote, type Elegibilidad } from "../elegibilidad/evaluar.js";
 
 /** Lo que devuelve cada modo de escaneo cuando hubo contenido nuevo. */
 interface Extraccion {
@@ -60,11 +61,20 @@ export async function escanearFuente(fuenteId: string): Promise<ResultadoEscaneo
       return { estado: "sin_cambios", paginasVisitadas: 1, convocatoriasNuevas: 0, tokensUsados: 0 };
     }
 
-    let nuevas = 0;
-    for (const hallazgo of extraccion.hallazgos) {
-      const creada = await registrarHallazgo(fuenteId, hallazgo);
-      if (creada) nuevas += 1;
+    const nuevos = await soloNuevos(extraccion.hallazgos);
+    // La elegibilidad usa IA solo si queda cupo del día; si no, pasa lo que no
+    // descartaron las reglas (ver elegibilidad/evaluar.ts).
+    const usarIa = (await tokensUsadosHoy()) + extraccion.tokensUsados < env.MAX_TOKENS_DIA;
+    const elegibilidad = await evaluarLote(
+      nuevos.map((n) => n.hallazgo),
+      { usarIa },
+    );
+    if (elegibilidad.errorIa) console.warn(`[escaneo] elegibilidad sin IA para "${fuente.nombre}": ${elegibilidad.errorIa}`);
+
+    for (const [i, nuevo] of nuevos.entries()) {
+      await registrarHallazgo(fuenteId, nuevo, elegibilidad.resultados[i]!);
     }
+    const nuevas = nuevos.length;
 
     await prisma.fuente.update({
       where: { id: fuenteId },
@@ -75,7 +85,7 @@ export async function escanearFuente(fuenteId: string): Promise<ResultadoEscaneo
       estado: "ok",
       paginasVisitadas: 1,
       convocatoriasNuevas: nuevas,
-      tokensUsados: extraccion.tokensUsados,
+      tokensUsados: extraccion.tokensUsados + elegibilidad.tokensUsados,
     };
     await registrarEscaneo({ fuenteId, inicioAt, ...resultado });
     return resultado;
@@ -134,12 +144,31 @@ async function escanearComoApi(url: string): Promise<Extraccion> {
   return { hallazgos: mapearRespuestaSecop(data), tokensUsados: 0 };
 }
 
-/** Crea la convocatoria si su huella no existe, y la mueve a pendiente_aprobacion. */
-async function registrarHallazgo(fuenteId: string, candidato: Hallazgo): Promise<boolean> {
-  const huella = calcularHuella(candidato);
+/**
+ * Deduplicación: deja solo los hallazgos cuya huella no está en la base (ni
+ * repetida dentro del mismo escaneo). Va antes de la elegibilidad para no gastar
+ * IA en convocatorias que ya teníamos.
+ */
+async function soloNuevos(hallazgos: Hallazgo[]): Promise<{ hallazgo: Hallazgo; huella: string }[]> {
+  const conHuella = hallazgos.map((hallazgo) => ({ hallazgo, huella: calcularHuella(hallazgo) }));
+  const existentes = await prisma.convocatoria.findMany({
+    where: { huella: { in: conHuella.map((h) => h.huella) } },
+    select: { huella: true },
+  });
+  const vistas = new Set(existentes.map((e) => e.huella));
+  return conHuella.filter(({ huella }) => (vistas.has(huella) ? false : (vistas.add(huella), true)));
+}
 
-  const existente = await prisma.convocatoria.findUnique({ where: { huella } });
-  if (existente) return false; // deduplicación: ya la teníamos, no se duplica
+/**
+ * Crea la convocatoria. Si le sirve a la fundación pasa a pendiente_aprobacion
+ * (y de ahí al bot); si no, nace no_apta con la razón y no le llega a nadie.
+ */
+async function registrarHallazgo(
+  fuenteId: string,
+  { hallazgo: candidato, huella }: { hallazgo: Hallazgo; huella: string },
+  elegibilidad: Elegibilidad,
+): Promise<void> {
+  const elegibilidadJson = elegibilidadComoJson(elegibilidad);
 
   const convocatoria = await prisma.convocatoria.create({
     data: {
@@ -159,19 +188,31 @@ async function registrarHallazgo(fuenteId: string, candidato: Hallazgo): Promise
         citaFechaCierre: candidato.citaFechaCierre,
         citaMonto: candidato.citaMonto,
         verificado: false, // TODO: verificación de citas (doc 03 · pipeline, paso 4)
+        elegibilidad: elegibilidadJson,
+        // Lo que dijo la fuente sobre la asignación, para poder re-evaluar sin volver a consultarla.
+        ...(candidato.yaSeleccionado !== undefined
+          ? { fuente: { yaSeleccionado: candidato.yaSeleccionado, ...(candidato.contratista ? { contratista: candidato.contratista } : {}) } }
+          : {}),
       },
-      estado: "detectada",
+      // "(nueva) → no_apta" es una entrada válida de la tabla de transiciones; se deja
+      // el evento a mano porque no es un cambio de estado sino el estado inicial.
+      ...(elegibilidad.apta
+        ? { estado: "detectada" as const }
+        : {
+            estado: "no_apta" as const,
+            eventos: { create: { estadoNuevo: "no_apta", origen: "sistema", nota: `No encaja: ${elegibilidad.razon}` } },
+          }),
     },
   });
 
-  // Paso 6-7 del pipeline: detectada → pendiente_aprobacion, y de ahí sale el aviso
-  // por Telegram (bot: fase 3 del plan, aún no implementada).
+  if (!elegibilidad.apta) return;
+
+  // Paso 6-7 del pipeline: detectada → pendiente_aprobacion, y de ahí la ve la
+  // directora en el bot (/pendientes).
   await transicionarConvocatoria(convocatoria.id, "pendiente_aprobacion", {
     origen: "sistema",
-    nota: "Detectada por el agente evaluador.",
+    nota: `Detectada y apta: ${elegibilidad.razon}`,
   });
-
-  return true;
 }
 
 interface RegistrarEscaneoInput extends ResultadoEscaneo {

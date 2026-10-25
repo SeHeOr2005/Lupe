@@ -14,7 +14,7 @@ beforeAll(async () => {
   const { buildServer } = await import("../src/http/server.js");
   app = buildServer();
   await app.ready();
-});
+}, 30_000); // cargar el cliente de Prisma generado tarda varios segundos con todos los tests en paralelo
 
 afterAll(() => app.close());
 

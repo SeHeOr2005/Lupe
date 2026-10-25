@@ -21,7 +21,9 @@ const where = [
   "estado_de_apertura_del_proceso='Abierto'",
   "fecha_de_publicacion_del IS NOT NULL",
   "justificaci_n_modalidad_de like '%092%'",
-  "(upper(entidad) like '%ALCALD%' OR upper(entidad) like '%MUNICIPIO%' OR upper(entidad) like '%GOBERNACI%')",
+  // Asisco Up solo ejecuta en Manizales (config/perfil-fundacion.ts): el municipio y la
+  // Gobernación, que queda allí. Filtrar aquí hace que los 100 más recientes sean útiles.
+  "(upper(entidad) like '%MANIZALES%' OR upper(entidad) like '%GOBERNACI%')",
 ].join(" AND ");
 
 const secopUrl =
@@ -30,7 +32,7 @@ const secopUrl =
 
 const fuentes = [
   {
-    nombre: "SECOP II · Caldas · convenios con ESAL (Decreto 092)",
+    nombre: "SECOP II · Manizales · convenios con ESAL (Decreto 092)",
     urlBase: secopUrl,
     modo: "api" as const,
     dominiosPermitidos: ["www.datos.gov.co"],
@@ -41,7 +43,10 @@ const fuentes = [
 ];
 
 for (const fuente of fuentes) {
-  const existente = await prisma.fuente.findFirst({ where: { nombre: fuente.nombre } });
+  // Se busca también por la URL del dataset para no duplicar la fuente si cambia el nombre.
+  const existente = await prisma.fuente.findFirst({
+    where: { OR: [{ nombre: fuente.nombre }, { urlBase: { startsWith: fuente.urlBase.split("?")[0]! } }] },
+  });
   if (existente) {
     await prisma.fuente.update({ where: { id: existente.id }, data: fuente });
     console.log(`Actualizada: ${fuente.nombre}`);

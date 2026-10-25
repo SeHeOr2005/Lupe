@@ -115,3 +115,119 @@ export async function evaluarPaginaUnica(texto: string, fuenteNombre: string): P
     tokensUsados: response.usageMetadata?.totalTokenCount ?? 0,
   };
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Elegibilidad: ¿le sirve esta convocatoria a la fundación? (ver elegibilidad/)
+// ──────────────────────────────────────────────────────────────────────────
+
+const veredictoSchema = z.object({
+  indice: z.number().int(),
+  apta: z.boolean(),
+  razon: z.string(),
+  /** Organización a la que ya está asignado el convenio, o "" si no se sabe. */
+  asignadoA: z.string().optional(),
+});
+
+const elegibilidadSchema = z.object({ veredictos: z.array(veredictoSchema) });
+
+export type VeredictoIa = z.infer<typeof veredictoSchema>;
+
+const ELEGIBILIDAD_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    veredictos: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          indice: { type: "integer" },
+          apta: { type: "boolean" },
+          razon: { type: "string", description: "una frase corta en español" },
+          asignadoA: {
+            type: "string",
+            description: "nombre de la organización a la que ya está asignado el convenio, o cadena vacía",
+          },
+        },
+        required: ["indice", "apta", "razon", "asignadoA"],
+      },
+    },
+  },
+  required: ["veredictos"],
+};
+
+const PROMPT_ELEGIBILIDAD = `Eres el filtro de elegibilidad de Lupe. Decides si cada convocatoria pública
+le sirve a esta fundación:
+
+{{perfil}}
+
+Temas afines: {{temas}}.
+
+Marca apta = true si el objeto tiene que ver con la población o los temas de la fundación
+y se ejecuta en {{municipio}} (o en todo el departamento, incluyendo {{municipio}}). Marca
+apta = false si es de otro tema (obras, compras, turismo, agro, eventos ajenos a su
+población...) o si se ejecuta en otro municipio. Que el convenio ya esté asignado a otra
+organización NO lo hace apta = false: a la directora le sirve saber con quién trabaja la
+entidad en su tema. Ante la duda razonable, apta = true: es peor esconderle una
+oportunidad que mostrarle una de más.
+
+asignadoA: si el título es el nombre de una organización (en SECOP, cuando el convenio
+ya tiene la entidad sin ánimo de lucro escogida, el título suele ser su nombre, p. ej.
+"BATUTA" o "CORPORACIÓN X") o la descripción nombra a la organización que lo ejecuta,
+escribe ese nombre. Si el título describe un objeto o evento ("FESTIVAL DE TEATRO",
+"AUNAR ESFUERZOS PARA...") o es un número, deja asignadoA vacío. No inventes nombres.
+
+Responde un veredicto por cada índice, con una razón corta en español.`;
+
+export interface ItemElegibilidad {
+  indice: number;
+  titulo: string;
+  entidad: string;
+  resumen?: string;
+  /** La fuente (SECOP) dice que el contratista ya está escogido. */
+  yaSeleccionado?: boolean;
+}
+
+export interface Perfil {
+  descripcion: string;
+  temasAfines: readonly string[];
+  municipio: string;
+}
+
+export async function evaluarElegibilidad(
+  items: ItemElegibilidad[],
+  perfil: Perfil,
+): Promise<{ veredictos: VeredictoIa[]; tokensUsados: number }> {
+  if (items.length === 0) return { veredictos: [], tokensUsados: 0 };
+
+  const ai = getClient();
+  const prompt = PROMPT_ELEGIBILIDAD.replace("{{perfil}}", perfil.descripcion)
+    .replace("{{temas}}", perfil.temasAfines.join("; "))
+    .replaceAll("{{municipio}}", perfil.municipio);
+  const lista = items
+    .map(
+      (i) =>
+        `[${i.indice}] ${i.titulo}\nEntidad: ${i.entidad}` +
+        (i.yaSeleccionado ? "\nSECOP: el contratista ya fue seleccionado." : "") +
+        (i.resumen ? `\nDescripción: ${i.resumen.slice(0, 600)}` : ""),
+    )
+    .join("\n\n");
+
+  const response = await ai.models.generateContent({
+    model: env.MODELO_EVALUADOR,
+    contents: [
+      { role: "user", parts: [{ text: prompt }] },
+      { role: "user", parts: [{ text: `--- CONVOCATORIAS ---\n${lista}` }] },
+    ],
+    config: {
+      responseMimeType: "application/json",
+      responseJsonSchema: ELEGIBILIDAD_JSON_SCHEMA,
+      temperature: 0,
+    },
+  });
+
+  const parsed = elegibilidadSchema.safeParse(JSON.parse(response.text ?? "{}"));
+  if (!parsed.success) {
+    throw new Error(`Gemini devolvió un JSON de elegibilidad que no cumple el esquema: ${parsed.error.message}`);
+  }
+  return { veredictos: parsed.data.veredictos, tokensUsados: response.usageMetadata?.totalTokenCount ?? 0 };
+}

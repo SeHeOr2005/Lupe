@@ -26,7 +26,15 @@ describe("mapeo de SECOP II", () => {
       fechaCierre: undefined,
       montoMaximo: 84609548,
       urlOrigen: "https://community.secop.gov.co/Public/Tendering/OpportunityDetail/Index?noticeUID=CO1.NTC.1",
+      yaSeleccionado: false,
+      contratista: undefined,
     });
+  });
+
+  it("marca los convenios con contratista ya seleccionado", () => {
+    const h = mapearFilaSecop({ ...filaReal, estado_del_procedimiento: "Seleccionado", nombre_del_proveedor: "No Definido" });
+    expect(h.yaSeleccionado).toBe(true);
+    expect(h.contratista).toBeUndefined(); // "No Definido" no es un nombre
   });
 
   it("no inventa monto cuando SECOP trae 0 o basura", () => {
