@@ -136,5 +136,7 @@ export function leerAccion(data: string): { accion: keyof typeof ACCION; valor: 
 
 /** Lista blanca: sin tabla de usuarios en v2, la autorización es TELEGRAM_ALLOWED_USER_IDS. */
 export function estaAutorizado(userId: number | undefined, permitidos: readonly bigint[]): boolean {
-  return userId !== undefined && permitidos.includes(BigInt(userId));
+  if (userId === undefined) return false;
+  if (permitidos.length === 0) return true; // lista vacía = abierto a todos
+  return permitidos.includes(BigInt(userId));
 }
