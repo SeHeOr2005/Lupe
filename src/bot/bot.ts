@@ -9,6 +9,7 @@ import { allowedTelegramUserIds } from "../config/env.js";
 import { aprobarConvocatoria, descartarConvocatoria } from "../services/convocatorias.js";
 import { HttpError } from "../http/errors.js";
 import { registrarRecepcionDeDocumentos } from "./documentos.js";
+import { EsperaDeDocumentos } from "./espera.js";
 import {
   ACCION,
   TAMANO_PAGINA,
@@ -18,6 +19,7 @@ import {
   tarjetaConvocatoria,
   textoNoAutorizado,
   textoPaginacion,
+  textoPedirDocumentos,
 } from "./formato.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -65,8 +67,11 @@ async function enviarPendientes(ctx: Context, desde: number) {
   });
 }
 
-/** Botón ✅/❌: hace la transición y deja en la tarjeta quién decidió, sin botones. */
-async function decidir(ctx: Context, accion: "aprobar" | "descartar", id: string) {
+/**
+ * Botón ✅/❌: hace la transición y deja en la tarjeta quién decidió, sin botones.
+ * Al aprobar, además pide el pliego para que el explorador arme el paso a paso.
+ */
+async function decidir(ctx: Context, accion: "aprobar" | "descartar", id: string, espera: EsperaDeDocumentos) {
   const nota = `${accion === "aprobar" ? "Aprobada" : "Descartada"} desde Telegram por ${nombreDe(ctx)}.`;
   try {
     const c = accion === "aprobar" ? await aprobarConvocatoria(id, nota) : await descartarConvocatoria(id, nota);
@@ -75,6 +80,16 @@ async function decidir(ctx: Context, accion: "aprobar" | "descartar", id: string
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },
     });
+
+    if (accion === "aprobar" && ctx.chat) {
+      // force_reply abre la respuesta a este mensaje: basta con adjuntar el PDF.
+      await ctx.reply(textoPedirDocumentos(c), {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        reply_markup: { force_reply: true, input_field_placeholder: "Adjunta el PDF del pliego" },
+      });
+      espera.marcar(ctx.chat.id, c.id);
+    }
   } catch (err) {
     // 409: alguien ya la decidió (otra persona del equipo, u otro mensaje viejo). 404: ya no existe.
     if (err instanceof HttpError && (err.statusCode === 409 || err.statusCode === 404)) {
@@ -93,6 +108,7 @@ async function decidir(ctx: Context, accion: "aprobar" | "descartar", id: string
 export function crearBot(token: string): Bot {
   const bot = new Bot(token);
   const permitidos = allowedTelegramUserIds();
+  const espera = new EsperaDeDocumentos();
 
   // Lista blanca antes que todo: quien no esté en TELEGRAM_ALLOWED_USER_IDS solo
   // recibe su propio ID (para que se lo pase a quien administra) y nada más.
@@ -136,11 +152,11 @@ export function crearBot(token: string): Bot {
       await enviarPendientes(ctx, Number(leida.valor) || 0);
       return;
     }
-    await decidir(ctx, leida.accion, leida.valor);
+    await decidir(ctx, leida.accion, leida.valor, espera);
   });
 
   // PDF o capturas de una convocatoria → paso a paso, fecha de cierre y documentos exigidos.
-  registrarRecepcionDeDocumentos(bot, token);
+  registrarRecepcionDeDocumentos(bot, token, espera);
 
   bot.on("message", (ctx) => ctx.reply("No entendí. Escribe /ayuda para ver lo que puedo hacer."));
 

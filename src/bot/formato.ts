@@ -144,6 +144,31 @@ export function idDeConvocatoriaEn(texto: string | undefined): string | undefine
   return /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(texto ?? "")?.[0]?.toLowerCase();
 }
 
+/**
+ * Lo que el bot pide justo después de aprobar: el pliego para armar el paso a
+ * paso. Lleva el id al final para que la respuesta quede asociada a la convocatoria.
+ */
+export function textoPedirDocumentos(c: { id: string; urlOrigen: string; analisisIa?: unknown }): string {
+  const tipo = tipoProcesoDe(c.analisisIa);
+  const asignada = asignacionDe(c.analisisIa) !== undefined || tipo === "directo";
+  const enlace = c.urlOrigen
+    ? `<a href="${escaparHtml(c.urlOrigen)}">abre el proceso en SECOP</a>`
+    : "abre el proceso en la página de la entidad";
+  return [
+    "📄 <b>Ahora mándame el pliego</b> para armarte el paso a paso:",
+    "",
+    `1. ${enlace} (resuelve el captcha si aparece).`,
+    "2. En <i>Documentos del proceso</i>, descarga el pliego, la invitación o los «Documentos precontractuales» (PDF).",
+    "3. Si el cronograma no viene en el PDF, toma una captura de la sección <i>Cronograma</i>.",
+    "4. <b>Responde a este mensaje</b> con el PDF (y la captura si la tienes).",
+    ...(asignada
+      ? ["", "⚠ Ojo: según SECOP, la entidad ya escogió o escoge directamente la organización. Sirve como referencia, pero puede que no haya postulación abierta."]
+      : []),
+    "",
+    `<code>${c.id}</code>`,
+  ].join("\n");
+}
+
 export const TEXTO_SIN_CONVOCATORIA = [
   "¿De qué convocatoria es este archivo?",
   "Mantén presionada la tarjeta de la convocatoria → <i>Responder</i>, y vuelve a adjuntarlo.",

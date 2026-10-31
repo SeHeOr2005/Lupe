@@ -13,6 +13,7 @@ import { prisma } from "../db/prisma.js";
 import { archivosPrevios, explorarConvocatoria, type ArchivoGuardado } from "../explorador/aplicar.js";
 import { idDeConvocatoriaEn, TEXTO_SIN_CONVOCATORIA, textoResumenExploracion } from "./formato.js";
 import { mensajeErrorIa } from "../ai/reintentos.js";
+import type { EsperaDeDocumentos } from "./espera.js";
 
 /** Límite de Telegram para que un bot descargue un archivo. */
 const MAX_BYTES_ARCHIVO = 20 * 1024 * 1024;
@@ -66,7 +67,7 @@ function recortarMensaje(texto: string): string {
   return texto.length <= MAX_MENSAJE ? texto : `${texto.slice(0, MAX_MENSAJE - 40)}\n…\n(resumen recortado)`;
 }
 
-export function registrarRecepcionDeDocumentos(bot: Bot, token: string) {
+export function registrarRecepcionDeDocumentos(bot: Bot, token: string, espera: EsperaDeDocumentos) {
   const pendientes = new Map<string, Pendiente>(); // clave: chat + convocatoria
   const albumes = new Map<string, string>(); // media_group_id → convocatoria (solo el 1.er mensaje trae el pie)
   const enCurso = new Map<string, Promise<void>>(); // una lectura a la vez por convocatoria
@@ -138,7 +139,8 @@ export function registrarRecepcionDeDocumentos(bot: Bot, token: string) {
     const convocatoriaId =
       idDeConvocatoriaEn(ctx.message.reply_to_message?.text ?? ctx.message.reply_to_message?.caption) ??
       idDeConvocatoriaEn(ctx.message.caption) ??
-      (grupo ? albumes.get(grupo) : undefined);
+      (grupo ? albumes.get(grupo) : undefined) ??
+      espera.para(ctx.chat.id); // la última convocatoria aprobada en este chat
     if (!convocatoriaId) {
       // En un álbum solo el primer archivo trae la respuesta; los demás esperan un momento a que llegue.
       if (!grupo) await ctx.reply(TEXTO_SIN_CONVOCATORIA, { parse_mode: "HTML" });
