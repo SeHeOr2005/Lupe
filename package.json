@@ -16,7 +16,8 @@
     "db:seed": "prisma db seed",
     "elegibilidad:reevaluar": "tsx src/scripts/reevaluar-pendientes.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "docs:export": "node --input-type=module -e \"import { swaggerSpec } from './src/docs/swagger.js'; import { writeFileSync } from 'fs'; writeFileSync('openapi.json', JSON.stringify(swaggerSpec, null, 2)); console.log('openapi.json exportado.');\""
   },
   "keywords": [],
   "author": "",
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
+    "openapi-types": "^12.1.3",
     "prisma": "^7.10.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
@@ -31,6 +33,8 @@
   },
   "dependencies": {
     "@fastify/sensible": "^6.0.3",
+    "@fastify/swagger": "^9.9.2",
+    "@fastify/swagger-ui": "^6.1.2",
     "@google/genai": "^2.31.0",
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.0",
