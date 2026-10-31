@@ -15,12 +15,11 @@
 import { prisma } from "../db/prisma.js";
 import { elegibilidadComoJson, evaluarLote } from "../elegibilidad/evaluar.js";
 import { transicionarConvocatoria } from "../services/convocatorias.js";
-import { consultarEstadosSecop } from "../scraping/secop.js";
+import { consultarEstadosSecop, type EstadoSecop } from "../scraping/secop.js";
 import type { Hallazgo } from "../jobs/hallazgo.js";
 
 const aplicar = process.argv.includes("--aplicar");
 
-type InfoFuente = { yaSeleccionado?: boolean; contratista?: string };
 const comoObjeto = (v: unknown): Record<string, unknown> =>
   v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 
@@ -30,12 +29,15 @@ const convocatorias = await prisma.convocatoria.findMany({
 });
 console.log(`${convocatorias.length} convocatorias clasificadas por el sistema. Evaluando...`);
 
-// Las guardadas antes de registrar si SECOP ya tiene contratista: se consulta ahora.
-const sinDatoDeFuente = convocatorias.filter((c) => !comoObjeto(c.analisisIa)["fuente"] && c.numeroProceso);
-const estadosSecop = await consultarEstadosSecop(sinDatoDeFuente.map((c) => c.numeroProceso!));
+// Se pregunta a SECOP el estado de HOY de todas: un proceso puede quedar "Seleccionado"
+// semanas después de detectado, y las guardadas antes no tenían la modalidad.
+const estadosSecop = await consultarEstadosSecop(
+  convocatorias.flatMap((c) => (c.numeroProceso ? [c.numeroProceso] : [])),
+);
 
-const infoFuente = (c: (typeof convocatorias)[number]): InfoFuente =>
-  (comoObjeto(c.analisisIa)["fuente"] as InfoFuente | undefined) ?? estadosSecop.get(c.numeroProceso ?? "") ?? {};
+/** Lo de SECOP hoy y, si no se pudo consultar, lo que se guardó al detectarla. */
+const infoFuente = (c: (typeof convocatorias)[number]): Partial<EstadoSecop> =>
+  estadosSecop.get(c.numeroProceso ?? "") ?? (comoObjeto(c.analisisIa)["fuente"] as Partial<EstadoSecop> | undefined) ?? {};
 
 const hallazgos: Hallazgo[] = convocatorias.map((c) => ({
   titulo: c.titulo,
@@ -58,7 +60,13 @@ for (const [i, c] of convocatorias.entries()) {
   if (cambia) cambios += 1;
 
   if (e.apta || cambia) {
-    const asignado = e.asignacion ? `  [ya asignado${e.asignacion.organizacion ? ` a ${e.asignacion.organizacion}` : ""}]` : "";
+    const asignado = e.asignacion
+      ? `  [ya asignado${e.asignacion.organizacion ? ` a ${e.asignacion.organizacion}` : ""}]`
+      : e.tipoProceso === "directo"
+        ? "  [convenio directo]"
+        : e.tipoProceso === "competitivo"
+          ? "  [ABIERTA a propuestas]"
+          : "";
     console.log(`${e.apta ? "✅" : "❌"}${cambia ? " (cambia)" : ""} ${c.titulo.slice(0, 70)}${asignado}\n     ${e.razon}`);
   }
   if (!aplicar) continue;

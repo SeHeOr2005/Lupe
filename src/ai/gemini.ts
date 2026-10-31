@@ -185,6 +185,8 @@ export interface ItemElegibilidad {
   resumen?: string;
   /** La fuente (SECOP) dice que el contratista ya está escogido. */
   yaSeleccionado?: boolean;
+  /** Convenio directo: la entidad escoge la organización (régimen especial sin ofertas). */
+  directo?: boolean;
 }
 
 export interface Perfil {
@@ -208,6 +210,7 @@ export async function evaluarElegibilidad(
       (i) =>
         `[${i.indice}] ${i.titulo}\nEntidad: ${i.entidad}` +
         (i.yaSeleccionado ? "\nSECOP: el contratista ya fue seleccionado." : "") +
+        (i.directo ? "\nSECOP: convenio directo, la entidad escoge la organización." : "") +
         (i.resumen ? `\nDescripción: ${i.resumen.slice(0, 600)}` : ""),
     )
     .join("\n\n");

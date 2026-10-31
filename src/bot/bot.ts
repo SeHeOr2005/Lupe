@@ -8,6 +8,7 @@ import { prisma } from "../db/prisma.js";
 import { allowedTelegramUserIds } from "../config/env.js";
 import { aprobarConvocatoria, descartarConvocatoria } from "../services/convocatorias.js";
 import { HttpError } from "../http/errors.js";
+import { registrarRecepcionDeDocumentos } from "./documentos.js";
 import {
   ACCION,
   TAMANO_PAGINA,
@@ -137,6 +138,9 @@ export function crearBot(token: string): Bot {
     }
     await decidir(ctx, leida.accion, leida.valor);
   });
+
+  // PDF o capturas de una convocatoria → paso a paso, fecha de cierre y documentos exigidos.
+  registrarRecepcionDeDocumentos(bot, token);
 
   bot.on("message", (ctx) => ctx.reply("No entendí. Escribe /ayuda para ver lo que puedo hacer."));
 

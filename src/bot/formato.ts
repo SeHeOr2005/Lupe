@@ -28,6 +28,27 @@ export function asignacionDe(analisisIa: unknown): { organizacion?: string } | u
   return typeof a.organizacion === "string" && a.organizacion !== "" ? { organizacion: a.organizacion } : {};
 }
 
+/** Directo (la entidad escoge la organización) o competitivo (abierto a propuestas), si se sabe. */
+export function tipoProcesoDe(analisisIa: unknown): "directo" | "competitivo" | undefined {
+  const t = (analisisIa as { elegibilidad?: { tipoProceso?: unknown } } | null)?.elegibilidad?.tipoProceso;
+  return t === "directo" || t === "competitivo" ? t : undefined;
+}
+
+/**
+ * La línea que dice si la directora puede postularse o no. De lo más concreto a
+ * lo más general: a quién está asignado, que ya está asignado, que es un convenio
+ * directo (aunque SECOP aún no lo marque como seleccionado), o que está abierta.
+ */
+export function etiquetaProceso(analisisIa: unknown): string | undefined {
+  const asignacion = asignacionDe(analisisIa);
+  const tipo = tipoProcesoDe(analisisIa);
+  if (asignacion?.organizacion) return `🔒 <b>Ya asignado a: ${escaparHtml(asignacion.organizacion)}</b>`;
+  if (asignacion) return "🔒 <b>Ya asignado</b> (SECOP no publica a quién)";
+  if (tipo === "directo") return "🔒 <b>Convenio directo:</b> la entidad escoge la organización (no es convocatoria abierta)";
+  if (tipo === "competitivo") return "🟢 <b>Abierta a propuestas</b>";
+  return undefined;
+}
+
 /** La razón de elegibilidad guardada por el filtro, si la convocatoria quedó como apta. */
 export function razonElegibilidad(analisisIa: unknown): string | undefined {
   const e = (analisisIa as { elegibilidad?: { apta?: unknown; razon?: unknown } } | null)?.elegibilidad;
@@ -71,14 +92,8 @@ function recortar(texto: string, max: number): string {
 export function tarjetaConvocatoria(c: ConvocatoriaParaMostrar): string {
   const lineas = [`<b>${escaparHtml(c.titulo)}</b>`];
 
-  const asignacion = asignacionDe(c.analisisIa);
-  if (asignacion) {
-    lineas.push(
-      asignacion.organizacion
-        ? `🔒 <b>Ya asignado a: ${escaparHtml(asignacion.organizacion)}</b>`
-        : "🔒 <b>Ya asignado</b> (SECOP no publica a quién)",
-    );
-  }
+  const etiqueta = etiquetaProceso(c.analisisIa);
+  if (etiqueta) lineas.push(etiqueta);
 
   lineas.push(`🏛 ${escaparHtml(c.entidad)}`);
 
@@ -117,7 +132,93 @@ export const TEXTO_AYUDA = [
   "/ayuda — este mensaje",
   "",
   "En cada convocatoria puedes tocar ✅ <b>Aprobar</b> o ❌ <b>Descartar</b>.",
+  "",
+  "📄 <b>Paso a paso de una convocatoria:</b> descarga el pliego o los documentos precontractuales",
+  "en SECOP, mantén presionada la tarjeta de la convocatoria → <i>Responder</i>, y adjunta el PDF.",
+  "Si el cronograma no viene en el PDF, manda también una captura de la sección «Cronograma»",
+  "de la página del proceso. Te devuelvo la fecha de cierre, los pasos y los documentos que piden.",
 ].join("\n");
+
+/** Busca el id de una convocatoria en un texto (una tarjeta, o lo que la persona escribió). */
+export function idDeConvocatoriaEn(texto: string | undefined): string | undefined {
+  return /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(texto ?? "")?.[0]?.toLowerCase();
+}
+
+export const TEXTO_SIN_CONVOCATORIA = [
+  "¿De qué convocatoria es este archivo?",
+  "Mantén presionada la tarjeta de la convocatoria → <i>Responder</i>, y vuelve a adjuntarlo.",
+  "También sirve escribir su id en el pie del archivo.",
+].join("\n");
+
+const NOMBRE_TIPO: Record<string, string> = {
+  rut: "RUT",
+  certificado_existencia_representacion: "Certificado de existencia y representación legal",
+  cedula_representante_legal: "Cédula del representante legal",
+  certificado_antecedentes_fiscales: "Antecedentes fiscales",
+  certificado_antecedentes_disciplinarios: "Antecedentes disciplinarios",
+  certificado_antecedentes_judiciales: "Antecedentes judiciales",
+  estados_financieros: "Estados financieros",
+  hoja_vida_entidad: "Hoja de vida de la entidad",
+};
+
+/** Lo que el bot contesta después de leer los documentos de una convocatoria. */
+export interface ResumenExploracion {
+  titulo: string;
+  fechaCierre?: { fecha: Date; origen: "pdf" | "captura" | "sin_respaldo" };
+  pasos: { titulo: string; descripcion?: string }[];
+  documentos: { tipo: string; descripcion: string; listo: boolean }[];
+  requisitosHabilitantes: string[];
+  advertencias: string[];
+  archivosLeidos: number;
+}
+
+const formatoCierre = new Intl.DateTimeFormat("es-CO", { dateStyle: "full", timeStyle: "short", timeZone: "America/Bogota" });
+
+export function textoResumenExploracion(r: ResumenExploracion): string {
+  const lineas = [`📖 Leí ${r.archivosLeidos === 1 ? "el archivo" : `los ${r.archivosLeidos} archivos`} de:`, `<b>${escaparHtml(r.titulo)}</b>`, ""];
+
+  if (r.fechaCierre) {
+    const cuando = escaparHtml(formatoCierre.format(r.fechaCierre.fecha));
+    const respaldo =
+      r.fechaCierre.origen === "pdf"
+        ? "✔ confirmada en el documento"
+        : r.fechaCierre.origen === "captura"
+          ? "⚠ tomada de la captura, confírmala"
+          : "⚠ no la pude confirmar en el documento, revísala";
+    lineas.push(`⏳ <b>Cierre:</b> ${cuando}`, `    ${respaldo}`);
+  } else {
+    lineas.push("⏳ <b>Cierre:</b> no lo encontré. Si está en la página del proceso, mándame una captura del cronograma.");
+  }
+
+  if (r.pasos.length > 0) {
+    lineas.push("", `🗓 <b>Paso a paso (${r.pasos.length}):</b>`);
+    r.pasos.forEach((p, i) =>
+      lineas.push(`${i + 1}. ${escaparHtml(p.titulo)}${p.descripcion ? ` — <i>${escaparHtml(p.descripcion)}</i>` : ""}`),
+    );
+  }
+
+  if (r.documentos.length > 0) {
+    const listos = r.documentos.filter((d) => d.listo).length;
+    lineas.push("", `📎 <b>Documentos que piden</b> (ya tienes ${listos} de ${r.documentos.length}):`);
+    for (const d of r.documentos) {
+      const nombre = NOMBRE_TIPO[d.tipo] ?? d.descripcion;
+      lineas.push(`${d.listo ? "✅" : "⬜"} ${escaparHtml(recortar(nombre, 140))}`);
+    }
+  }
+
+  if (r.requisitosHabilitantes.length > 0) {
+    lineas.push("", "🧾 <b>Requisitos habilitantes:</b>");
+    for (const req of r.requisitosHabilitantes.slice(0, 8)) lineas.push(`• ${escaparHtml(recortar(req, 160))}`);
+  }
+
+  if (r.advertencias.length > 0) {
+    lineas.push("", "⚠ <b>Para revisar:</b>");
+    for (const a of r.advertencias.slice(0, 5)) lineas.push(`• ${escaparHtml(recortar(a, 200))}`);
+  }
+
+  lineas.push("", "Si me mandas más archivos de esta convocatoria, los leo junto con estos.");
+  return lineas.join("\n");
+}
 
 export function textoNoAutorizado(userId: number): string {
   return [

@@ -5,9 +5,17 @@
 import { createHash } from "node:crypto";
 import type { Candidato } from "../ai/gemini.js";
 
+/**
+ * Cómo se escoge al contratista según la fuente: "directo" cuando la entidad elige
+ * la organización (no es una convocatoria abierta) y "competitivo" cuando varias
+ * pueden presentar propuestas. Ver scraping/secop.ts#tipoDeProceso.
+ */
+export type TipoProceso = "directo" | "competitivo";
+
 /** Lo que trae el evaluador, más lo que solo da una fuente estructurada (modo api). */
 export type Hallazgo = Candidato & {
   urlOrigen?: string;
+  tipoProceso?: TipoProceso;
   /** La fuente dice que el contratista ya está escogido (SECOP: "Seleccionado"/adjudicado). */
   yaSeleccionado?: boolean;
   /** Nombre del contratista, si la fuente lo publica (SECOP casi nunca lo hace a tiempo). */

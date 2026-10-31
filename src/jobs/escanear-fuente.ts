@@ -11,6 +11,7 @@ import { env } from "../config/env.js";
 import { fetchHtml, fetchJsonApi } from "../scraping/fetchers.js";
 import { mapearRespuestaSecop } from "../scraping/secop.js";
 import { evaluarPaginaUnica } from "../ai/gemini.js";
+import { tokensUsadosHoy } from "../ai/presupuesto.js";
 import { transicionarConvocatoria } from "../services/convocatorias.js";
 import { calcularHuella, type Hallazgo } from "./hallazgo.js";
 import { elegibilidadComoJson, evaluarLote, type Elegibilidad } from "../elegibilidad/evaluar.js";
@@ -127,17 +128,6 @@ async function escanearComoPaginaUnica(
   return { hallazgos: candidatos, tokensUsados };
 }
 
-/** Suma de tokens de IA gastados desde la medianoche (hora de TZ, America/Bogota). */
-async function tokensUsadosHoy(): Promise<number> {
-  const inicioDelDia = new Date();
-  inicioDelDia.setHours(0, 0, 0, 0);
-  const { _sum } = await prisma.escaneo.aggregate({
-    where: { inicioAt: { gte: inicioDelDia } },
-    _sum: { tokensUsados: true },
-  });
-  return _sum.tokensUsados ?? 0;
-}
-
 /** Datos abiertos (SECOP II): ya viene estructurado, no gasta IA. Ver scraping/secop.ts. */
 async function escanearComoApi(url: string): Promise<Extraccion> {
   const { data } = await fetchJsonApi(url);
@@ -191,7 +181,13 @@ async function registrarHallazgo(
         elegibilidad: elegibilidadJson,
         // Lo que dijo la fuente sobre la asignación, para poder re-evaluar sin volver a consultarla.
         ...(candidato.yaSeleccionado !== undefined
-          ? { fuente: { yaSeleccionado: candidato.yaSeleccionado, ...(candidato.contratista ? { contratista: candidato.contratista } : {}) } }
+          ? {
+              fuente: {
+                yaSeleccionado: candidato.yaSeleccionado,
+                ...(candidato.contratista ? { contratista: candidato.contratista } : {}),
+                ...(candidato.tipoProceso ? { tipoProceso: candidato.tipoProceso } : {}),
+              },
+            }
           : {}),
       },
       // "(nueva) → no_apta" es una entrada válida de la tabla de transiciones; se deja

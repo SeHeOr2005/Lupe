@@ -3,7 +3,7 @@
  * Ya viene estructurado, así que no gasta IA. El filtro (departamento, Decreto 092, etc.) va
  * en el `$where` de `fuentes.url_base`; aquí solo se traducen las columnas de SECOP.
  */
-import type { Hallazgo } from "../jobs/hallazgo.js";
+import type { Hallazgo, TipoProceso } from "../jobs/hallazgo.js";
 
 /** Máximo de filas que se procesan por escaneo, aunque la URL pida más. */
 export const MAX_FILAS_SECOP = 100;
@@ -27,7 +27,34 @@ export function mapearFilaSecop(row: unknown): Hallazgo {
     urlOrigen: typeof urlProceso === "string" ? urlProceso : undefined,
     yaSeleccionado: estaSeleccionado(texto("estado_del_procedimiento"), texto("adjudicado")),
     contratista: contratista && !SIN_DATO.test(contratista) ? contratista : undefined,
+    ...comoTipo(tipoDeProceso(texto("modalidad_de_contratacion"))),
   };
+}
+
+const comoTipo = (tipoProceso: TipoProceso | undefined) => (tipoProceso ? { tipoProceso } : {});
+
+/**
+ * En los convenios con ESAL (Decreto 092), SECOP distingue dos modalidades:
+ *   - "Contratación régimen especial (con ofertas)": proceso competitivo, varias
+ *     organizaciones pueden presentar propuesta.
+ *   - "Contratación régimen especial" (sin "con ofertas"): la entidad escoge
+ *     directamente la organización. En 2026, los 122 procesos así de Manizales y la
+ *     Gobernación recibieron cero ofertas; muchos siguen en "Publicado" o
+ *     "Evaluación" aunque ya tengan el convenio redactado.
+ * Otras modalidades no se clasifican (la fuente actual solo trae Decreto 092).
+ */
+export function tipoDeProceso(modalidad?: string): TipoProceso | undefined {
+  if (!modalidad) return undefined;
+  if (/con ofertas/i.test(modalidad)) return "competitivo";
+  if (/r[eé]gimen especial/i.test(modalidad)) return "directo";
+  return undefined;
+}
+
+/** Lo que SECOP dice hoy de un proceso: si ya hay contratista y cómo se escoge. */
+export interface EstadoSecop {
+  yaSeleccionado: boolean;
+  contratista?: string;
+  tipoProceso?: TipoProceso;
 }
 
 /** SECOP llena los campos vacíos con textos como "No Definido" o "No Adjudicado". */
@@ -42,18 +69,17 @@ export function estaSeleccionado(estadoProcedimiento?: string, adjudicado?: stri
 }
 
 /**
- * Consulta en datos.gov.co el estado de varios procesos por su id (CO1.REQ...).
- * Sirve para completar convocatorias guardadas antes de que se registrara ese dato.
+ * Consulta en datos.gov.co el estado actual de varios procesos por su id (CO1.REQ...).
+ * Sirve para refrescar convocatorias ya guardadas: un proceso puede pasar a
+ * "Seleccionado" semanas después de detectado.
  */
-export async function consultarEstadosSecop(
-  ids: string[],
-): Promise<Map<string, { yaSeleccionado: boolean; contratista?: string }>> {
-  const resultado = new Map<string, { yaSeleccionado: boolean; contratista?: string }>();
+export async function consultarEstadosSecop(ids: string[]): Promise<Map<string, EstadoSecop>> {
+  const resultado = new Map<string, EstadoSecop>();
   const validos = ids.filter((id) => /^[A-Z0-9.]+$/i.test(id)); // van dentro de un $where: nada de comillas
   for (let i = 0; i < validos.length; i += 50) {
     const lote = validos.slice(i, i + 50);
     const params = new URLSearchParams({
-      $select: "id_del_proceso, estado_del_procedimiento, adjudicado, nombre_del_proveedor",
+      $select: "id_del_proceso, estado_del_procedimiento, adjudicado, nombre_del_proveedor, modalidad_de_contratacion",
       $where: `id_del_proceso in (${lote.map((id) => `'${id}'`).join(",")})`,
       $limit: "1000",
     });
@@ -65,7 +91,8 @@ export async function consultarEstadosSecop(
       const contratista = fila["nombre_del_proveedor"];
       resultado.set(id, {
         yaSeleccionado: estaSeleccionado(fila["estado_del_procedimiento"], fila["adjudicado"]),
-        contratista: contratista && !SIN_DATO.test(contratista) ? contratista : undefined,
+        ...(contratista && !SIN_DATO.test(contratista) ? { contratista } : {}),
+        ...comoTipo(tipoDeProceso(fila["modalidad_de_contratacion"])),
       });
     }
   }
