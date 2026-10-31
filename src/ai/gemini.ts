@@ -12,6 +12,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import { env } from "../config/env.js";
+import { conModeloDeRespaldo } from "./reintentos.js";
 
 const candidatoSchema = z.object({
   titulo: z.string(),
@@ -91,18 +92,21 @@ export interface ResultadoEvaluacion {
 
 export async function evaluarPaginaUnica(texto: string, fuenteNombre: string): Promise<ResultadoEvaluacion> {
   const ai = getClient();
-  const response = await ai.models.generateContent({
-    model: env.MODELO_EVALUADOR,
-    contents: [
-      { role: "user", parts: [{ text: PROMPT_EVALUADOR.replace("{{fuente}}", fuenteNombre) }] },
-      { role: "user", parts: [{ text: `--- TEXTO DE LA PÁGINA ---\n${texto.slice(0, 900_000)}` }] },
-    ],
-    config: {
-      responseMimeType: "application/json",
-      responseJsonSchema: RESPONSE_JSON_SCHEMA,
-      temperature: 0,
-    },
-  });
+  // Si el evaluador está saturado (503), se reintenta y luego se usa el modelo del explorador.
+  const response = await conModeloDeRespaldo([env.MODELO_EVALUADOR, env.MODELO_EXPLORADOR], (model) =>
+    ai.models.generateContent({
+      model,
+      contents: [
+        { role: "user", parts: [{ text: PROMPT_EVALUADOR.replace("{{fuente}}", fuenteNombre) }] },
+        { role: "user", parts: [{ text: `--- TEXTO DE LA PÁGINA ---\n${texto.slice(0, 900_000)}` }] },
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseJsonSchema: RESPONSE_JSON_SCHEMA,
+        temperature: 0,
+      },
+    }),
+  );
 
   const raw = response.text ?? "{}";
   const parsed = evaluacionSchema.safeParse(JSON.parse(raw));
@@ -215,18 +219,21 @@ export async function evaluarElegibilidad(
     )
     .join("\n\n");
 
-  const response = await ai.models.generateContent({
-    model: env.MODELO_EVALUADOR,
-    contents: [
-      { role: "user", parts: [{ text: prompt }] },
-      { role: "user", parts: [{ text: `--- CONVOCATORIAS ---\n${lista}` }] },
-    ],
-    config: {
-      responseMimeType: "application/json",
-      responseJsonSchema: ELEGIBILIDAD_JSON_SCHEMA,
-      temperature: 0,
-    },
-  });
+  // Si el evaluador está saturado (503), se reintenta y luego se usa el modelo del explorador.
+  const response = await conModeloDeRespaldo([env.MODELO_EVALUADOR, env.MODELO_EXPLORADOR], (model) =>
+    ai.models.generateContent({
+      model,
+      contents: [
+        { role: "user", parts: [{ text: prompt }] },
+        { role: "user", parts: [{ text: `--- CONVOCATORIAS ---\n${lista}` }] },
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseJsonSchema: ELEGIBILIDAD_JSON_SCHEMA,
+        temperature: 0,
+      },
+    }),
+  );
 
   const parsed = elegibilidadSchema.safeParse(JSON.parse(response.text ?? "{}"));
   if (!parsed.success) {

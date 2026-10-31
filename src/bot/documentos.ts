@@ -12,6 +12,7 @@ import type { Bot, Context } from "grammy";
 import { prisma } from "../db/prisma.js";
 import { archivosPrevios, explorarConvocatoria, type ArchivoGuardado } from "../explorador/aplicar.js";
 import { idDeConvocatoriaEn, TEXTO_SIN_CONVOCATORIA, textoResumenExploracion } from "./formato.js";
+import { mensajeErrorIa } from "../ai/reintentos.js";
 
 /** Límite de Telegram para que un bot descargue un archivo. */
 const MAX_BYTES_ARCHIVO = 20 * 1024 * 1024;
@@ -116,8 +117,7 @@ export function registrarRecepcionDeDocumentos(bot: Bot, token: string) {
       );
     } catch (err) {
       console.error("[bot] error leyendo documentos:", err);
-      const motivo = err instanceof Error ? err.message : String(err);
-      await editar(`⚠ No pude leer los documentos.\n<i>${motivo.replace(/[<>&]/g, "")}</i>`).catch(() => {});
+      await editar(`⚠ No pude leer los documentos.\n<i>${mensajeErrorIa(err).replace(/[<>&]/g, "")}</i>`).catch(() => {});
     }
   }
 

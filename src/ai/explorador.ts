@@ -11,6 +11,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import { env } from "../config/env.js";
+import { conModeloDeRespaldo } from "./reintentos.js";
 
 /** Tipos de documento del modelo de datos (enum tipo_documento). */
 export const TIPOS_DOCUMENTO = [
@@ -140,26 +141,29 @@ export async function leerDocumentos(
 ): Promise<{ extraccion: ExtraccionDocumentos; tokensUsados: number }> {
   const prompt = PROMPT_EXPLORADOR.replace("{{titulo}}", contexto.titulo).replace("{{entidad}}", contexto.entidad);
 
-  const response = await getClient().models.generateContent({
-    model: env.MODELO_EXPLORADOR,
-    contents: [
-      {
-        role: "user",
-        parts: [
-          ...archivos.flatMap((a) => [
-            { text: `--- Archivo: ${a.nombre} ---` },
-            { inlineData: { mimeType: a.mimeType, data: a.datos.toString("base64") } },
-          ]),
-          { text: prompt },
-        ],
+  // Si el explorador está saturado (503), se reintenta y luego se usa el modelo del evaluador.
+  const response = await conModeloDeRespaldo([env.MODELO_EXPLORADOR, env.MODELO_EVALUADOR], (model) =>
+    getClient().models.generateContent({
+      model,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            ...archivos.flatMap((a) => [
+              { text: `--- Archivo: ${a.nombre} ---` },
+              { inlineData: { mimeType: a.mimeType, data: a.datos.toString("base64") } },
+            ]),
+            { text: prompt },
+          ],
+        },
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseJsonSchema: EXTRACCION_JSON_SCHEMA,
+        temperature: 0,
       },
-    ],
-    config: {
-      responseMimeType: "application/json",
-      responseJsonSchema: EXTRACCION_JSON_SCHEMA,
-      temperature: 0,
-    },
-  });
+    }),
+  );
 
   const parsed = extraccionSchema.safeParse(JSON.parse(response.text ?? "{}"));
   if (!parsed.success) {
