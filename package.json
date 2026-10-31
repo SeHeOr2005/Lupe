@@ -17,7 +17,7 @@
     "elegibilidad:reevaluar": "tsx src/scripts/reevaluar-pendientes.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "docs:export": "node --input-type=module -e \"import { swaggerSpec } from './src/docs/swagger.js'; import { writeFileSync } from 'fs'; writeFileSync('openapi.json', JSON.stringify(swaggerSpec, null, 2)); console.log('openapi.json exportado.');\""
+    "docs:export": "tsx src/scripts/exportar-openapi.ts"
   },
   "keywords": [],
   "author": "",
