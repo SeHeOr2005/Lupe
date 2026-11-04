@@ -9,6 +9,7 @@ import { allowedTelegramUserIds } from "../config/env.js";
 import { aprobarConvocatoria, descartarConvocatoria } from "../services/convocatorias.js";
 import { HttpError } from "../http/errors.js";
 import { registrarRecepcionDeDocumentos } from "./documentos.js";
+import { registrarCarpeta } from "./carpeta.js";
 import { EsperaDeDocumentos } from "./espera.js";
 import {
   ACCION,
@@ -140,6 +141,10 @@ export function crearBot(token: string): Bot {
     });
   });
 
+  // Carpeta de la fundación (/documentos). Va antes del manejador general de botones
+  // y del explorador: sus botones ("cp:...") y los archivos que espera son suyos.
+  registrarCarpeta(bot);
+
   bot.on("callback_query:data", async (ctx) => {
     const leida = leerAccion(ctx.callbackQuery.data);
     if (!leida) {
@@ -172,6 +177,8 @@ export async function registrarComandos(bot: Bot) {
   await bot.api.setMyCommands([
     { command: "pendientes", description: "Convocatorias que esperan aprobación" },
     { command: "convocatoria", description: "Ver una convocatoria por id" },
+    { command: "documentos", description: "Carpeta de la fundación: ver, subir, actualizar" },
+    { command: "cancelar", description: "Cancelar lo que estaba haciendo" },
     { command: "ayuda", description: "Qué puede hacer Lupe" },
   ]);
 }

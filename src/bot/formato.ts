@@ -129,6 +129,7 @@ export const TEXTO_AYUDA = [
   "",
   "/pendientes — convocatorias que esperan tu aprobación",
   "/convocatoria &lt;id&gt; — ver una convocatoria puntual",
+  "/documentos — carpeta de la fundación: ver, subir, actualizar o eliminar documentos",
   "/ayuda — este mensaje",
   "",
   "En cada convocatoria puedes tocar ✅ <b>Aprobar</b> o ❌ <b>Descartar</b>.",
@@ -175,7 +176,7 @@ export const TEXTO_SIN_CONVOCATORIA = [
   "También sirve escribir su id en el pie del archivo.",
 ].join("\n");
 
-const NOMBRE_TIPO: Record<string, string> = {
+export const NOMBRE_TIPO: Record<string, string> = {
   rut: "RUT",
   certificado_existencia_representacion: "Certificado de existencia y representación legal",
   cedula_representante_legal: "Cédula del representante legal",
