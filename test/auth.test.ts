@@ -24,6 +24,18 @@ describe("API key", () => {
     expect(res.statusCode).toBe(200);
   });
 
+  it("deja abrir la documentación de Swagger sin clave", async () => {
+    for (const url of ["/api-docs", "/api-docs/", "/api-docs/json", "/api-docs.json"]) {
+      const res = await app.inject({ method: "GET", url });
+      expect(res.statusCode, url).not.toBe(401);
+    }
+  });
+
+  it("la documentación no abre la puerta a rutas que solo se parecen", async () => {
+    const res = await app.inject({ method: "GET", url: "/api-docsx" });
+    expect(res.statusCode).toBe(401);
+  });
+
   it("rechaza peticiones sin clave", async () => {
     const res = await app.inject({ method: "GET", url: "/convocatorias" });
     expect(res.statusCode).toBe(401);

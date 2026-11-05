@@ -240,6 +240,54 @@ detectada → pendiente_aprobacion → aprobada → en_postulacion → postulada
   (refleja la FK compuesta `(resultado_id, resultado_estado)` del modelo);
   `montoRecibido` reemplaza a la antigua tabla `desembolsos`.
 
+## Explorador: paso a paso desde los documentos
+
+La página de detalle de un proceso en SECOP II está protegida con reCAPTCHA, así
+que Lupe no la lee sola. En su lugar, la directora (o quien prepare la
+postulación) descarga los documentos y se los manda al bot:
+
+1. En SECOP, abrir el proceso y descargar el pliego, la invitación o los
+   "Documentos Precontractuales" (PDF, máximo 20 MB).
+2. Si el pliego dice que el cronograma está en la plataforma, tomar una captura
+   de la sección **Cronograma** de la página del proceso.
+3. En Telegram, mantener presionada la tarjeta de la convocatoria → *Responder*,
+   y adjuntar el PDF y la captura (pueden ir juntos).
+
+El bot (`src/bot/documentos.ts`) junta los archivos de un mismo envío, los lee
+con `MODELO_EXPLORADOR` (`src/ai/explorador.ts`, Gemini lee PDF e imágenes) y
+guarda (`src/explorador/aplicar.ts`):
+
+- `convocatorias.fecha_cierre`, marcada como confirmada si su cita aparece en el
+  texto del PDF (`src/explorador/citas.ts`), o "tomada de la captura" si vino de
+  una imagen, que no se puede verificar.
+- El cronograma como `convocatoria_pasos` (se conservan los pasos ya completados).
+- Los documentos exigidos como `convocatoria_documentos`, marcados como listos si
+  la fundación ya tiene uno vigente del mismo tipo en `documentos_fundacion`.
+- Los requisitos habilitantes y criterios de evaluación en `convocatorias.requisitos`.
+
+Si después llegan más archivos de la misma convocatoria, se vuelven a leer todos
+juntos. Cada lectura queda en `escaneos` y cuenta para `MAX_TOKENS_DIA` (un
+pliego de ~60 páginas gasta ~35.000 tokens; una captura, ~3.000).
+
+## Carpeta de la fundación (`/documentos` en el bot)
+
+Menú con los documentos de la fundación (`documentos_fundacion`): RUT, cámara de
+comercio, cédula del representante legal, antecedentes, estados financieros...
+Cada uno muestra su estado (✅ vigente, ⚠️ vence en menos de 30 días, ❌ vencido,
+📄 sin fecha). Desde el bot se puede:
+
+- **Subir** uno nuevo: elegir el tipo y enviar el PDF o la foto.
+- **Ver** uno: el bot reenvía el archivo con su ficha.
+- **Reemplazar** el archivo (por ejemplo, un certificado renovado).
+- **Editar** el nombre y las fechas de expedición y vencimiento.
+- **Eliminar** (pide confirmación).
+
+`src/services/documentosFundacion.ts` mantiene sincronizadas las convocatorias: al
+subir un documento, las `convocatoria_documentos` de ese tipo que estaban
+pendientes pasan a "listo"; al eliminarlo, vuelven a "pendiente". Los archivos
+viven en Telegram (se guarda su `file_id`, que es propio de cada bot: lo subido
+con el bot de desarrollo no se ve desde el de producción).
+
 ## Historial del modelo (v1 → v2)
 
 - `fuentes.modo` gana `"api"` (datos abiertos, ej. SECOP II vía datos.gov.co).
@@ -253,11 +301,9 @@ detectada → pendiente_aprobacion → aprobada → en_postulacion → postulada
 
 ## Pendiente para las siguientes fases
 
-- Verificación de citas carácter-a-carácter contra la página (hoy se guarda
-  la cita que trae el modelo, con `verificado: false`).
-- Elegibilidad automática contra `config/perfil-fundacion.ts` (hoy toda
-  convocatoria detectada pasa a `pendiente_aprobacion`; la directora filtra).
-- Bot de Telegram (grammY) sobre este mismo CRUD/flujo, con el aviso con
-  botones ✅/❌ que dispara `/convocatorias/:id/aprobar|descartar`.
+- Verificación de citas en la lectura de páginas web (`pagina_unica`); en el
+  explorador de documentos ya se verifica la fecha de cierre contra el PDF.
+- Descargar solo los documentos de SECOP desde datos.gov.co (conjunto
+  `dmgg-8hin`) para no depender de que la directora los mande.
 - Agente explorador multi-página (modo `exploracion`, hoy lanza "no implementado").
 - Cambiar el `setInterval` del worker por pg-boss si el número de fuentes crece.

@@ -217,4 +217,8 @@ $RECYCLE.BIN/
 
 # End of https://www.toptal.com/developers/gitignore/api/windows,linux,macos,node
 /src/generated/prisma
+# Cliente de Prisma generado con la ruta vieja (antes de moverlo a src/): no se usa
+/generated
+# Salida de npm run docs:export
+/openapi.json
 .env

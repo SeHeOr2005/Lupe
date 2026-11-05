@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { evaluarReglas } from "../src/elegibilidad/reglas.js";
-import { asignacionDe, razonElegibilidad, tarjetaConvocatoria } from "../src/bot/formato.js";
+import { asignacionDe, etiquetaProceso, razonElegibilidad, tarjetaConvocatoria } from "../src/bot/formato.js";
 import { nombreSiEsOrganizacion, type Hallazgo } from "../src/jobs/hallazgo.js";
 import { detectarAsignacion } from "../src/elegibilidad/evaluar.js";
-import { estaSeleccionado } from "../src/scraping/secop.js";
+import { estaSeleccionado, mapearFilaSecop, tipoDeProceso } from "../src/scraping/secop.js";
 
 const manizales = (titulo: string): Hallazgo => ({ titulo, entidad: "MUNICIPIO DE MANIZALES" });
 
@@ -95,9 +95,38 @@ describe("etiqueta de asignación en el bot", () => {
     expect(t).toContain("Ya asignado</b> (SECOP no publica a quién)");
   });
 
-  it("no muestra nada en convocatorias abiertas", () => {
+  it("no muestra nada si no se sabe cómo se escoge al contratista", () => {
     expect(tarjetaConvocatoria({ ...base, analisisIa: { elegibilidad: { apta: true } } })).not.toContain("asignado");
+    expect(etiquetaProceso({ elegibilidad: { apta: true } })).toBeUndefined();
     expect(asignacionDe(null)).toBeUndefined();
+  });
+
+  it("marca el convenio directo aunque SECOP todavía no diga «Seleccionado»", () => {
+    const t = tarjetaConvocatoria({ ...base, analisisIa: { elegibilidad: { tipoProceso: "directo" } } });
+    expect(t).toContain("Convenio directo:</b> la entidad escoge la organización");
+  });
+
+  it("destaca las que de verdad están abiertas a propuestas", () => {
+    expect(etiquetaProceso({ elegibilidad: { tipoProceso: "competitivo" } })).toContain("🟢 <b>Abierta a propuestas</b>");
+  });
+
+  it("si ya está asignado, eso pesa más que el tipo de proceso", () => {
+    const e = { elegibilidad: { tipoProceso: "competitivo", asignacion: { organizacion: "Fundación X" } } };
+    expect(etiquetaProceso(e)).toContain("Ya asignado a: Fundación X");
+  });
+});
+
+describe("modalidad de SECOP", () => {
+  it("distingue el convenio directo del competitivo", () => {
+    expect(tipoDeProceso("Contratación régimen especial")).toBe("directo");
+    expect(tipoDeProceso("Contratación régimen especial (con ofertas)")).toBe("competitivo");
+    expect(tipoDeProceso("Mínima cuantía")).toBeUndefined();
+    expect(tipoDeProceso(undefined)).toBeUndefined();
+  });
+
+  it("el mapeo de SECOP trae el tipo de proceso", () => {
+    const h = mapearFilaSecop({ entidad: "MUNICIPIO DE MANIZALES", modalidad_de_contratacion: "Contratación régimen especial" });
+    expect(h.tipoProceso).toBe("directo");
   });
 });
 

@@ -11,7 +11,7 @@
  */
 import { evaluarElegibilidad as evaluarConIa, type VeredictoIa } from "../ai/gemini.js";
 import { PERFIL_FUNDACION } from "../config/perfil-fundacion.js";
-import { nombreSiEsOrganizacion, type Hallazgo } from "../jobs/hallazgo.js";
+import { nombreSiEsOrganizacion, type Hallazgo, type TipoProceso } from "../jobs/hallazgo.js";
 import { evaluarReglas } from "./reglas.js";
 
 export interface Elegibilidad {
@@ -21,6 +21,8 @@ export interface Elegibilidad {
   fuente: "reglas" | "ia" | "sin_evaluar";
   /** Presente si el convenio ya tiene organización; `organizacion` solo si se sabe cuál. */
   asignacion?: { organizacion?: string };
+  /** Directo (la entidad escoge la organización) o competitivo (abierto a propuestas), si la fuente lo dice. */
+  tipoProceso?: TipoProceso;
 }
 
 const TAMANO_LOTE = 25;
@@ -60,6 +62,7 @@ export async function evaluarLote(
           entidad: h.entidad,
           resumen: h.resumen,
           yaSeleccionado: h.yaSeleccionado,
+          directo: h.tipoProceso === "directo",
         })),
         PERFIL_FUNDACION,
       );
@@ -81,15 +84,16 @@ export async function evaluarLote(
   }
 
   return {
-    resultados: resultados.map(
-      (r, i) =>
-        r ?? {
-          apta: true,
-          razon: "No se pudo evaluar con IA; se deja pasar para revisión.",
-          fuente: "sin_evaluar",
-          asignacion: detectarAsignacion(hallazgos[i]!),
-        },
-    ),
+    resultados: resultados.map((r, i) => {
+      const h = hallazgos[i]!;
+      const resultado: Elegibilidad = r ?? {
+        apta: true,
+        razon: "No se pudo evaluar con IA; se deja pasar para revisión.",
+        fuente: "sin_evaluar",
+        asignacion: detectarAsignacion(h),
+      };
+      return h.tipoProceso ? { ...resultado, tipoProceso: h.tipoProceso } : resultado;
+    }),
     tokensUsados,
     errorIa,
   };
@@ -102,5 +106,6 @@ export function elegibilidadComoJson(e: Elegibilidad) {
     razon: e.razon,
     fuente: e.fuente,
     ...(e.asignacion ? { asignacion: e.asignacion.organizacion ? { organizacion: e.asignacion.organizacion } : {} } : {}),
+    ...(e.tipoProceso ? { tipoProceso: e.tipoProceso } : {}),
   };
 }
