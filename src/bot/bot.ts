@@ -10,6 +10,7 @@ import { aprobarConvocatoria, descartarConvocatoria } from "../services/convocat
 import { HttpError } from "../http/errors.js";
 import { registrarRecepcionDeDocumentos } from "./documentos.js";
 import { registrarCarpeta } from "./carpeta.js";
+import { crearAvisos } from "./avisos.js";
 import { EsperaDeDocumentos } from "./espera.js";
 import {
   ACCION,
@@ -106,7 +107,11 @@ async function decidir(ctx: Context, accion: "aprobar" | "descartar", id: string
   }
 }
 
-export function crearBot(token: string): Bot {
+/**
+ * Arma el bot con todos sus comandos. Devuelve también los avisos, cuyo reloj
+ * del resumen diario se arranca aparte (arranque.ts), cuando el bot ya escucha.
+ */
+export function crearBot(token: string): { bot: Bot; avisos: ReturnType<typeof crearAvisos> } {
   const bot = new Bot(token);
   const permitidos = allowedTelegramUserIds();
   const espera = new EsperaDeDocumentos();
@@ -145,6 +150,10 @@ export function crearBot(token: string): Bot {
   // y del explorador: sus botones ("cp:...") y los archivos que espera son suyos.
   registrarCarpeta(bot);
 
+  // Resumen diario de convocatorias nuevas (/avisos, /resumen). También antes del
+  // manejador general: sus botones ("av:...") son suyos.
+  const avisos = crearAvisos(bot);
+
   bot.on("callback_query:data", async (ctx) => {
     const leida = leerAccion(ctx.callbackQuery.data);
     if (!leida) {
@@ -169,7 +178,7 @@ export function crearBot(token: string): Bot {
     console.error("[bot] error atendiendo una actualización:", err.error);
   });
 
-  return bot;
+  return { bot, avisos };
 }
 
 /** Menú de comandos que Telegram muestra al escribir "/". */
@@ -178,6 +187,8 @@ export async function registrarComandos(bot: Bot) {
     { command: "pendientes", description: "Convocatorias que esperan aprobación" },
     { command: "convocatoria", description: "Ver una convocatoria por id" },
     { command: "documentos", description: "Carpeta de la fundación: ver, subir, actualizar" },
+    { command: "avisos", description: "Activar o desactivar el resumen diario" },
+    { command: "resumen", description: "Convocatorias nuevas de las últimas 24 horas" },
     { command: "cancelar", description: "Cancelar lo que estaba haciendo" },
     { command: "ayuda", description: "Qué puede hacer Lupe" },
   ]);

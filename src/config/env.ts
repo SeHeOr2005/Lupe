@@ -26,6 +26,13 @@ const envSchema = z.object({
   /// IDs numéricos de Telegram autorizados a usar el bot (coma-separados). Sin tabla de
   /// usuarios en v2, esta es la "lista blanca" (ver README § Autorización sin tabla de usuarios).
   TELEGRAM_ALLOWED_USER_IDS: z.string().optional(),
+  /// Chats que reciben el resumen diario de convocatorias nuevas desde que arranca el bot
+  /// (coma-separados; en un chat privado, el chat_id es el ID de la persona). Cada quien
+  /// lo puede apagar o prender con /avisos; ese cambio vive en memoria hasta el próximo reinicio.
+  TELEGRAM_AVISOS_CHAT_IDS: z.string().optional(),
+  /// Cuándo se manda el resumen diario (cron de 5 campos, hora de TZ). Por defecto 7:30 a. m.,
+  /// media hora después del escaneo de SECOP (fuentes.cron = "0 7 * * *").
+  AVISOS_CRON: z.string().default("30 7 * * *"),
 
   // IA — Google AI Studio / Gemini es el proveedor por defecto (gratis, sin tarjeta,
   // contexto largo para leer páginas/PDF de convocatorias). Ver README § Modelo de IA.
@@ -67,6 +74,14 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+/** Chats que reciben el resumen diario por defecto (TELEGRAM_AVISOS_CHAT_IDS). */
+export function chatsConAvisos(): number[] {
+  return (env.TELEGRAM_AVISOS_CHAT_IDS ?? "")
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isSafeInteger(n) && n !== 0);
+}
 
 /** Lista de telegram_user_id autorizados, ya parseada a bigint. */
 export function allowedTelegramUserIds(): bigint[] {

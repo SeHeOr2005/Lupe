@@ -130,6 +130,8 @@ export const TEXTO_AYUDA = [
   "/pendientes — convocatorias que esperan tu aprobación",
   "/convocatoria &lt;id&gt; — ver una convocatoria puntual",
   "/documentos — carpeta de la fundación: ver, subir, actualizar o eliminar documentos",
+  "/avisos — activar o desactivar el resumen diario de convocatorias nuevas",
+  "/resumen — convocatorias nuevas de las últimas 24 horas",
   "/ayuda — este mensaje",
   "",
   "En cada convocatoria puedes tocar ✅ <b>Aprobar</b> o ❌ <b>Descartar</b>.",

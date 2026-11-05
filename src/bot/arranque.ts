@@ -24,7 +24,7 @@ export function prepararBot(app: FastifyInstance) {
     return undefined;
   }
 
-  const bot = crearBot(env.TELEGRAM_BOT_TOKEN);
+  const { bot, avisos } = crearBot(env.TELEGRAM_BOT_TOKEN);
   const usarWebhook = Boolean(env.PUBLIC_URL && env.TELEGRAM_WEBHOOK_SECRET);
 
   if (usarWebhook) {
@@ -44,8 +44,10 @@ export function prepararBot(app: FastifyInstance) {
         await bot.api.deleteWebhook();
         void bot.start({ onStart: (me) => app.log.info(`Bot de Telegram @${me.username} en modo long polling`) });
       }
+      avisos.iniciar();
     },
     async detener() {
+      avisos.detener();
       if (!usarWebhook) await bot.stop();
     },
   };

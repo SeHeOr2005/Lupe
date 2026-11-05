@@ -288,6 +288,24 @@ pendientes pasan a "listo"; al eliminarlo, vuelven a "pendiente". Los archivos
 viven en Telegram (se guarda su `file_id`, que es propio de cada bot: lo subido
 con el bot de desarrollo no se ve desde el de producción).
 
+## Avisos automáticos (resumen diario)
+
+Todos los días a la hora de `AVISOS_CRON` (por defecto 7:30 a. m., media hora
+después del escaneo de SECOP) el bot manda un resumen con las convocatorias que
+llegaron a pendientes de aprobación desde el resumen anterior: cuántas son
+abiertas a propuestas (🟢) y cuántas son de referencia (🔒 ya asignadas o de
+convenio directo), con un botón para verlas. Si no llegó nada, no escribe.
+
+- `/avisos`: ver si están activos y prenderlos o apagarlos.
+- `/resumen`: el resumen de las últimas 24 horas, en el momento.
+- `TELEGRAM_AVISOS_CHAT_IDS`: quién los recibe al arrancar el bot (por ejemplo, el
+  ID de Consuelo). Lo que cada quien cambie con `/avisos` vive en memoria: al
+  reiniciar o redesplegar el bot, vuelve a esta lista.
+
+El resumen lo manda el proceso del bot (`src/bot/avisos.ts`), no el worker, para
+que solo un proceso hable con Telegram; lee lo que el worker dejó en la base, así
+que sin el worker corriendo no habrá convocatorias nuevas que avisar.
+
 ## Historial del modelo (v1 → v2)
 
 - `fuentes.modo` gana `"api"` (datos abiertos, ej. SECOP II vía datos.gov.co).

@@ -85,8 +85,12 @@ describe("lista blanca", () => {
     expect(estaAutorizado(333, permitidos)).toBe(false);
   });
 
-  it("rechaza a todos si la lista está vacía o no hay usuario", () => {
-    expect(estaAutorizado(111, [])).toBe(false);
+  it("con la lista vacía, el bot queda abierto a todos (modo de prueba con profesores)", () => {
+    expect(estaAutorizado(111, [])).toBe(true);
+  });
+
+  it("sin usuario identificado, nunca deja pasar", () => {
     expect(estaAutorizado(undefined, permitidos)).toBe(false);
+    expect(estaAutorizado(undefined, [])).toBe(false);
   });
 });
