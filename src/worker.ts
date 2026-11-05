@@ -3,9 +3,16 @@
  * más la tarea diaria de vencimiento. La API (src/main.ts) sigue corriendo
  * aparte; en desarrollo ambos pueden correr juntos (ver doc "02 · Stack").
  */
+import { createServer } from "node:http";
 import { env } from "./config/env.js";
 import { marcarVencidas } from "./services/convocatorias.js";
 import { iniciarScheduler, tickFuentes } from "./jobs/scheduler.js";
+
+// Render exige un puerto abierto incluso en web services que no sirven HTTP.
+const port = env.PORT ?? 3001;
+createServer((_, res) => res.end("ok")).listen(port, () => {
+  console.log(`[worker] health check escuchando en :${port}`);
+});
 
 async function tickVencimiento() {
   const vencidas = await marcarVencidas();
