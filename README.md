@@ -184,6 +184,36 @@ src/
     └── routes/                   # un archivo por recurso
 ```
 
+## Guía de revisión (bot + API)
+
+Lupe se usa por **Telegram** (no hay frontend aparte) y expone una **API REST** documentada con Swagger.
+
+### 1. Pruebas funcionales en Telegram
+
+- Bot: `https://t.me/lupe_asisco_bot` — escribir `/start`.
+- El bot responde a los IDs de `TELEGRAM_ALLOWED_USER_IDS`; si esa lista está vacía, queda abierto a cualquier usuario (así está en la revisión). Un usuario no autorizado recibe su propio ID para pedir acceso.
+- Comandos: `/pendientes` (convocatorias por aprobar, con botones ✅ Aprobar / ❌ Descartar), `/convocatoria <id>`, `/documentos` (carpeta de la fundación), `/avisos`, `/resumen`, `/ayuda`.
+- Manejo de errores visible: `/convocatoria` con un id mal escrito, usuario no autorizado, PDF ilegible o presupuesto diario de IA agotado devuelven un mensaje claro, no un fallo.
+
+### 2. Pruebas técnicas del backend
+
+- Swagger UI: `https://lupe-d5f2.onrender.com/api-docs` · Spec JSON: `https://lupe-d5f2.onrender.com/api-docs.json` (importable en Postman: *Import → Link*; o `npm run docs:export` genera `openapi.json`).
+- Autenticación: botón **Authorize** → clave en `x-api-key` (o `Authorization: Bearer <clave>`). Sin clave: `401`. Públicas: `/health`, `/api-docs*`, y `/telegram/webhook` (lo protege `TELEGRAM_WEBHOOK_SECRET`).
+- Códigos: `200/201/204` éxito · `400` validación (`details.fieldErrors` por campo) · `401` sin clave · `404` id inexistente · `409` transición/estado no permitido · `500` error interno. Todos los errores: `{ "error", "message", "details?" }`.
+- Prueba rápida:
+
+```bash
+curl https://lupe-d5f2.onrender.com/health
+curl -H "x-api-key: <clave>" "https://lupe-d5f2.onrender.com/convocatorias?estado=pendiente_aprobacion&take=5"
+curl -X POST -H "x-api-key: <clave>" -H "content-type: application/json" -d '{}' https://lupe-d5f2.onrender.com/convocatorias   # → 400
+```
+
+### 3. Integración con otros componentes
+
+- Un servicio externo consume Lupe por la API REST con la API key (mismo contrato que Swagger). Contratos principales: `GET /convocatorias` (filtros `estado`, paginación `take/skip`), `POST /convocatorias/{id}/aprobar|descartar|transiciones`, `/postulaciones`, `/resultados`, `/adjudicaciones`, `/documentos-fundacion`.
+- Todos comparten la misma base de datos (Supabase/Postgres vía Prisma): el **worker** (`npm run worker`) escanea las fuentes (SECOP II) y deja convocatorias en `pendiente_aprobacion`; el **bot** las muestra y notifica; la **API** las expone.
+- Procesos desplegados en Render: web (`node dist/main.js`: API + bot por webhook) en https://lupe-d5f2.onrender.com y worker (`node dist/worker.js`, solo un health mínimo) en https://lupe-2.onrender.com.
+
 ## Endpoints
 
 Toda petición (salvo `GET /health`) lleva la clave de `API_KEY` en el header

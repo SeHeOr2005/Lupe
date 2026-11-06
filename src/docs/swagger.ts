@@ -22,7 +22,7 @@ const paginationParams: OpenAPIV3.ParameterObject[] = [
   { name: "skip", in: "query", schema: { type: "integer", default: 0, minimum: 0 }, description: "Cuántos resultados saltear" },
 ];
 
-export const swaggerSpec: OpenAPIV3.Document = {
+const spec: OpenAPIV3.Document = {
   openapi: "3.0.3",
   info: {
     title: "Lupe API – Asisco Up",
@@ -30,12 +30,19 @@ export const swaggerSpec: OpenAPIV3.Document = {
     description:
       "API REST del sistema de gestión de convocatorias para la fundación Asisco Up (Manizales). " +
       "Incluye fuentes de datos, convocatorias con ciclo de vida, postulaciones, resultados, adjudicaciones, " +
-      "documentos y recordatorios.",
+      "documentos y recordatorios. " +
+      "**Autenticación:** toda ruta, salvo `/health`, `/api-docs*` y el webhook de Telegram, exige la clave " +
+      "en el header `x-api-key` (o `Authorization: Bearer <clave>`). Sin ella responde `401`. " +
+      "En Swagger UI usa el botón **Authorize**. " +
+      "**Errores:** todos comparten el cuerpo `{ error, message, details? }`. `400` datos inválidos (zod), " +
+      "`401` sin clave, `404` recurso inexistente, `409` transición o estado no permitido, `500` error interno. " +
+      "**Integración:** otros servicios consumen Lupe por esta API REST con la API key; el bot de Telegram " +
+      "es el cliente principal y comparte la misma base de datos.",
     contact: { name: "Equipo Integrador" },
   },
   servers: [
     { url: "http://localhost:3000", description: "Desarrollo local" },
-    { url: process.env.PUBLIC_URL ?? "https://lupe-api.onrender.com", description: "Producción" },
+    ...(process.env.PUBLIC_URL ? [{ url: process.env.PUBLIC_URL, description: "Producción" }] : []),
   ],
   components: {
     securitySchemes: {
@@ -45,6 +52,11 @@ export const swaggerSpec: OpenAPIV3.Document = {
         name: "x-api-key",
         description: "Clave de API requerida en todos los endpoints (excepto /health).",
       },
+      bearerAuth: {
+        type: "http",
+        scheme: "bearer",
+        description: "Alternativa a x-api-key: `Authorization: Bearer <API_KEY>`.",
+      },
     },
     schemas: {
       Error: {
@@ -52,6 +64,7 @@ export const swaggerSpec: OpenAPIV3.Document = {
         properties: {
           error: { type: "string", example: "NotFoundError" },
           message: { type: "string", example: "convocatoria con id X no existe" },
+          details: { description: "Detalle opcional, p. ej. los errores de validación por campo." },
         },
       },
       Fuente: {
@@ -267,6 +280,18 @@ export const swaggerSpec: OpenAPIV3.Document = {
       },
     },
     responses: {
+      BadRequest: {
+        description: "Datos inválidos (falló la validación)",
+        content: { "application/json": { schema: { $ref: "#/components/schemas/Error" }, example: { error: "ValidationError", message: "El cuerpo de la petición no es válido.", details: { formErrors: [], fieldErrors: { titulo: ["Required"] } } } } },
+      },
+      Conflict: {
+        description: "Conflicto con el estado actual del recurso (transición no permitida, ya registrado...)",
+        content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+      },
+      ServerError: {
+        description: "Error interno del servidor",
+        content: { "application/json": { schema: { $ref: "#/components/schemas/Error" }, example: { error: "InternalServerError", message: "Error interno del servidor." } } },
+      },
       NotFound: {
         description: "Recurso no encontrado",
         content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
@@ -277,7 +302,7 @@ export const swaggerSpec: OpenAPIV3.Document = {
       },
     },
   },
-  security: [{ apiKey: [] }],
+  security: [{ apiKey: [] }, { bearerAuth: [] }],
   paths: {
     "/health": {
       get: {
@@ -1018,3 +1043,46 @@ export const swaggerSpec: OpenAPIV3.Document = {
     },
   },
 };
+
+// Completa en cada operación los errores que la API realmente puede devolver
+// (400 por validación, 404 por id inexistente, 409 por estado, 500 genérico)
+// para no repetirlos a mano en las ~50 rutas.
+const METODOS_CON_CUERPO = new Set(["post", "patch", "put"]);
+const RUTAS_CON_CONFLICTO = [
+  "/convocatorias/{id}/transiciones",
+  "/convocatorias/{id}/aprobar",
+  "/convocatorias/{id}/descartar",
+  "/postulaciones",
+  "/resultados/{id}/registrar",
+  "/adjudicaciones",
+];
+
+spec.paths["/telegram/webhook"] = {
+  post: {
+    tags: ["Sistema"],
+    summary: "Webhook de Telegram",
+    description:
+      "Lo llama Telegram, no los clientes de la API. Se protege con el header `X-Telegram-Bot-Api-Secret-Token` " +
+      "(`TELEGRAM_WEBHOOK_SECRET`), no con la API key. Solo existe si hay `PUBLIC_URL` y secreto configurados.",
+    security: [],
+    requestBody: { content: { "application/json": { schema: { type: "object", description: "Update de Telegram" } } } },
+    responses: { 200: { description: "Update procesado" }, 401: { description: "Secreto del webhook inválido" } },
+  },
+};
+
+for (const [ruta, item] of Object.entries(spec.paths)) {
+  for (const [metodo, op] of Object.entries(item ?? {})) {
+    if (!op || typeof op !== "object" || !("responses" in op)) continue;
+    const operacion = op as OpenAPIV3.OperationObject;
+    const r = operacion.responses as Record<string, unknown>;
+    const protegida = operacion.security === undefined || operacion.security.length > 0;
+    if (protegida) r["401"] ??= { $ref: "#/components/responses/Unauthorized" };
+    if (METODOS_CON_CUERPO.has(metodo) || (operacion.parameters ?? []).some((p) => "in" in p && p.in === "query"))
+      r["400"] ??= { $ref: "#/components/responses/BadRequest" };
+    if (ruta.includes("{") && ruta !== "/telegram/webhook") r["404"] ??= { $ref: "#/components/responses/NotFound" };
+    if (RUTAS_CON_CONFLICTO.includes(ruta) && metodo === "post") r["409"] ??= { $ref: "#/components/responses/Conflict" };
+    r["500"] ??= { $ref: "#/components/responses/ServerError" };
+  }
+}
+
+export const swaggerSpec: OpenAPIV3.Document = spec;
