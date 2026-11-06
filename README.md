@@ -1,357 +1,274 @@
-# Lupe · backend
+# Lupe 🔍
 
-Agentes de búsqueda de convocatorias, integración con Telegram y modelo de
-datos para Asisco Up (Manizales). Esta entrega cubre: el **CRUD** del modelo
-de datos v2, el **flujo inicial** del ciclo de vida de una convocatoria
-(estados + transiciones) y **el trigger que escanea las fuentes** (el
-scheduler que lee `fuentes` y dispara el scraping + IA). El bot de Telegram
-queda para la fase siguiente.
+**Lupe es un bot de Telegram que busca convocatorias de financiación y contratos públicos (SECOP II, Alcaldía de Manizales) para la fundación Asisco Up, las resume con IA y acompaña a la fundación desde que decide postularse hasta que registra el resultado.**
 
-## Stack
+Detrás del bot hay un backend con una API REST (documentada con Swagger), un worker que escanea las fuentes automáticamente y una base de datos Postgres.
 
-Node.js 22 + TypeScript, Fastify, Prisma 7 (driver adapter `pg`), zod, pino,
-`cron-parser` + `cheerio` (scraping), `@google/genai` (Gemini). Ver "Fastify
-vs. NestJS" y "Modelo de IA" más abajo.
+| | |
+|---|---|
+| 🤖 Bot de Telegram | [@lupe_asisco_bot](https://t.me/lupe_asisco_bot) |
+| 🌐 API en producción | https://lupe-d5f2.onrender.com |
+| 📖 Documentación Swagger | https://lupe-d5f2.onrender.com/api-docs |
+| 📄 Especificación OpenAPI (JSON) | https://lupe-d5f2.onrender.com/api-docs.json |
+| ❤️ Estado del servidor | https://lupe-d5f2.onrender.com/health |
 
-## Primeros pasos
+> El servicio gratuito de Render se duerme tras un rato sin uso: la primera petición puede tardar cerca de un minuto.
 
-```bash
-npm install
-cp .env.example .env     # completa DATABASE_URL, TELEGRAM_BOT_TOKEN, GEMINI_API_KEY
-npx prisma generate      # genera el client en src/generated/prisma
-npx prisma migrate dev --name init   # crea las tablas
-psql "$DATABASE_URL" -f prisma/views/vw_finanzas_convocatorias.sql  # crea la vista de finanzas
+## Contenido
 
-npm run dev       # API Fastify → http://localhost:3000
-npm run worker    # trigger de fuentes + tarea de vencimiento (otra terminal)
-```
+1. [Qué hace Lupe](#qué-hace-lupe)
+2. [Cómo probarlo](#cómo-probarlo)
+3. [Arquitectura](#arquitectura)
+4. [Ciclo de vida de una convocatoria](#ciclo-de-vida-de-una-convocatoria)
+5. [API REST](#api-rest)
+6. [Integración con otros servicios](#integración-con-otros-servicios)
+7. [Ejecutar en local](#ejecutar-en-local)
+8. [Variables de entorno](#variables-de-entorno)
+9. [Estructura del código](#estructura-del-código)
+10. [Decisiones técnicas](#decisiones-técnicas)
+11. [Pendiente](#pendiente)
 
-> ⚠️ Este sandbox no tiene salida de red hacia `binaries.prisma.sh`, así que
-> no pude ejecutar `prisma generate`/`migrate` aquí. `tsc --noEmit` compila
-> limpio salvo los imports a `src/generated/prisma/client.js` (que aparecen una
-> vez corras `prisma generate` localmente). Corre esos comandos en tu
-> máquina o en CI antes de `npm run dev` / `npm run worker`.
+## Qué hace Lupe
 
-## Conectar a Supabase
+1. **Busca.** Un worker revisa las fuentes según su programación (cron): SECOP II vía datos abiertos (`datos.gov.co`) y páginas de la Alcaldía.
+2. **Entiende.** Gemini extrae título, entidad, fechas y monto de las páginas; los datos se validan con zod antes de guardarse. SECOP casi no gasta IA porque ya viene estructurado.
+3. **Avisa.** Las convocatorias nuevas llegan a Telegram con botones **✅ Aprobar / ❌ Descartar**, y cada mañana se envía un resumen.
+4. **Prepara la postulación.** Al aprobar una convocatoria, la directora manda el pliego en PDF (y una captura del cronograma): el bot lee los documentos y arma el paso a paso, la fecha de cierre y la lista de documentos exigidos.
+5. **Controla los documentos de la fundación.** RUT, cámara de comercio, cédulas, etc., con su estado (✅ vigente, ⚠️ por vencer, ❌ vencido) y cruzados con lo que pide cada convocatoria.
+6. **Da seguimiento.** Registra la radicación, el resultado (ganada / no ganada) y la adjudicación con el monto recibido.
 
-La base de datos vive en Supabase, pero Prisma habla Postgres directo, no la
-API/SDK de Supabase — así que solo hace falta **`DATABASE_URL`**:
+## Cómo probarlo
 
-1. Supabase → tu proyecto → **Project Settings → Database → Connection string**.
-2. Copia la variante **"Session pooler"** (puerto 5432, vía Supavisor) y pégala
-   en `DATABASE_URL`. Es la recomendada aquí: funciona como Postgres normal
-   (soporta prepared statements, que es como consulta `@prisma/adapter-pg`) y
-   no necesita salida IPv6, a diferencia de la "Direct connection".
-3. `npx prisma migrate dev` y `npm run dev` / `npm run worker` usan esa misma
-   `DATABASE_URL` — no hace falta nada más.
+### Desde Telegram
 
-> Si en vez del pooler de sesión usas el **"Transaction pooler"** (puerto
-> 6543), `prisma migrate` falla porque ese modo no soporta las sesiones que
-> las migraciones necesitan. En ese caso agrega una `DIRECT_URL` con la
-> conexión directa y, en `prisma/schema.prisma`, `directUrl = env("DIRECT_URL")`
-> dentro de `datasource db` (ver [docs de Prisma](https://www.prisma.io/docs/orm/prisma-schema/overview/data-sources)).
+Abrir [@lupe_asisco_bot](https://t.me/lupe_asisco_bot) y escribir `/start`.
 
-Las otras 4 variables que ya tienes (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`,
-`SUPABASE_SECRET_KEY`, `SUPABASE_JWKS_URL`) son para el SDK/API REST de
-Supabase (Storage, Auth), no para la base de datos. Quedan declaradas en
-`.env.example`/`config/env.ts` por si más adelante conectas **Supabase
-Storage** para los archivos de `documentos_fundacion` o **Supabase Auth**
-para un panel web — hoy ningún archivo de `src/` las usa.
+| Comando | Qué hace |
+|---|---|
+| `/pendientes` | Convocatorias esperando decisión, con botones ✅ Aprobar / ❌ Descartar |
+| `/convocatoria <id>` | Muestra una convocatoria puntual |
+| `/documentos` | Carpeta de la fundación: ver, subir, reemplazar, editar o eliminar documentos |
+| `/avisos` | Activa o desactiva el resumen diario |
+| `/resumen` | Convocatorias nuevas de las últimas 24 horas |
+| `/ayuda` | Lista de comandos |
 
-## Arquitectura: del trigger de fuentes a Telegram
+Para ver el análisis de documentos: mantener presionada la tarjeta de una convocatoria → *Responder* → adjuntar el PDF del pliego.
 
-```mermaid
-flowchart TD
-    subgraph cron["⏱ Trigger (src/worker.ts)"]
-        T["setInterval cada SCHEDULER_TICK_MS\n(60s por defecto)"]
-    end
+**Acceso:** solo los IDs de Telegram listados en `TELEGRAM_ALLOWED_USER_IDS` pueden usar el bot; si la lista está vacía, queda abierto a cualquiera. Quien no tenga permiso recibe un mensaje con su propio ID para pedir acceso.
 
-    DB[(PostgreSQL)]
-    F["tabla fuentes\nactiva · cron · ultimo_escaneo_at · hash_contenido"]
+**Errores controlados:** un id mal escrito en `/convocatoria`, un usuario no autorizado, un PDF ilegible o el presupuesto diario de IA agotado devuelven un mensaje claro, no un fallo.
 
-    T -->|"lee fuentes activas"| F
-    F -->|"cron vencido\n(cron-parser)"| J["jobs/escanear-fuente.ts"]
-    F -. "cron aún no vence" .-> T
+### Desde Swagger (navegador)
 
-    J --> FE{"fuente.modo"}
-    FE -->|"pagina_unica"| HTML["scraping/fetchers.ts\nfetch + cheerio → texto limpio"]
-    FE -->|"api"| API["scraping/fetchers.ts\nfetch JSON (datos.gov.co / SECOP II)"]
-    FE -->|"exploracion"| TODO["agente explorador\n(fase 5, aún no implementado)"]
+1. Abrir https://lupe-d5f2.onrender.com/api-docs (no requiere clave).
+2. Pulsar **Authorize**, pegar la API key en `apiKey` y confirmar.
+3. Abrir un endpoint → **Try it out** → **Execute**.
 
-    HTML --> HASH{"¿hash = hash_contenido\nguardado en fuentes?"}
-    HASH -->|"sí: sin_cambios"| LOG1["escaneos\n(estado=sin_cambios, sin gastar IA)"]
-    HASH -->|"no: cambió"| GEMINI
+La API key es el valor de la variable `API_KEY` del servicio; quien administra el proyecto la entrega.
 
-    API --> MAP["mapeo directo\n(casi no necesita IA)"]
+Recorrido sugerido:
 
-    GEMINI["ai/gemini.ts\nGoogle Gemini (AI Studio)\nJSON + zod"] --> CAND["candidatos\n{titulo, entidad, fechas, monto, citas}"]
-    MAP --> CAND
+| Petición | Resultado esperado |
+|---|---|
+| `GET /health` (sin clave) | `200` |
+| `GET /convocatorias` antes de autorizar | `401` |
+| `GET /convocatorias` autorizado | `200` con `{ items, total, take, skip }` |
+| `POST /convocatorias` con `{}` | `400` con el detalle por campo |
+| `GET /convocatorias/{id}` con un id inexistente | `404` |
 
-    CAND --> DEDUP{"huella ya existe\nen convocatorias?"}
-    DEDUP -->|"sí"| SKIP["se ignora (ya la teníamos)"]
-    DEDUP -->|"no"| NEW["convocatorias\nestado = detectada"]
-
-    NEW --> TRANS["services/convocatorias.ts\ntransicionarConvocatoria()\norigen = sistema"]
-    TRANS --> PEND["estado = pendiente_aprobacion"]
-    PEND -.->|"fase 3, pendiente"| BOT["Bot de Telegram (grammY)\naviso con botones ✅/❌"]
-
-    J --> LOG2["escaneos\n(estado=ok/error, bitácora siempre)"]
-    LOG1 --> DB
-    LOG2 --> DB
-    NEW --> DB
-    TRANS --> DB
-
-    ENV[".env"] -. "GEMINI_API_KEY" .-> GEMINI
-    ENV -. "TELEGRAM_BOT_TOKEN\nTELEGRAM_ALLOWED_USER_IDS" .-> BOT
-
-    API2["API Fastify (src/main.ts)\nCRUD + /convocatorias/:id/aprobar\n/postulaciones · /resultados/:id/registrar"] --> DB
-    BOT -.->|"✅ Aprobar / ❌ Descartar\n(fase 3)"| API2
-```
-
-**Por qué un `setInterval` y no pg-boss todavía:** con dos fuentes y una
-revisión diaria, no hace falta una cola separada — un *tick* que lee
-Postgres cada minuto y compara el `cron` de cada fuente (con `cron-parser`)
-contra `ultimo_escaneo_at` es suficiente y no agrega infraestructura. El
-punto de entrada (`jobs/escanear-fuente.ts`) ya queda aislado para que
-cambiar el *trigger* por pg-boss más adelante (fase 5) no toque nada más.
-
-## Modelo de IA: Google Gemini (AI Studio)
-
-Gemini es el proveedor por defecto (`IA_PROVIDER=gemini` en `.env`):
-
-- Se activa con una cuenta de Google, sin tarjeta, con nivel gratuito real.
-- Los modelos Flash aguantan hasta ~1M tokens de contexto: suficiente para
-  leer de un tirón una página larga de SECOP o de la Alcaldía.
-- Devuelve JSON estructurado (`responseJsonSchema`), que `src/ai/gemini.ts`
-  vuelve a validar con **zod** antes de tocar la base de datos — nunca se
-  confía en el modelo a ciegas.
-- Con el volumen actual (dos fuentes, revisión diaria) los límites gratuitos
-  sobran (de 5 a 15 peticiones/min y entre 20 y 1.500/día según el modelo,
-  cifras de abril de 2026 — **confírmalas en Google AI Studio**, cambian seguido).
-
-**Cuidados que ya quedaron en el diseño:**
-- *Privacidad*: nunca le pasamos a Gemini los documentos de la fundación
-  (RUT, cédulas, certificados) — eso vive en `documentos_fundacion`/Telegram,
-  no en el prompt del evaluador. Solo se le manda el texto de páginas
-  públicas (SECOP, Alcaldía).
-- *Calidad*: `analisis_ia` en `convocatorias` guarda `citaFechaCierre` /
-  `citaMonto` (la cita textual que el modelo dice haber usado) con un flag
-  `verificado: false` — la verificación carácter-a-carácter contra la página
-  queda pendiente (ver § Pendiente); hasta que esté, toda convocatoria pasa
-  por aprobación humana igual (`pendiente_aprobacion`).
-- *SECOP II*: la fuente en modo `api` (datos.gov.co) casi no gasta IA porque
-  ya viene estructurado (`escanearComoApi` en `jobs/escanear-fuente.ts`); la
-  cuota de Gemini se gasta solo en páginas de la Alcaldía.
-
-**Plan B si Gemini se queda sin cupo** (`IA_PROVIDER` + su propia API key en
-`.env`, no están conectados todavía, solo documentados):
-
-| Proveedor | Límite gratis aprox. | Contexto | Nota |
-|---|---|---|---|
-| **Groq** | ~30 req/min, 1.000/día | 128K | Rapidísimo; Llama 3.3 70B. Buen plan B. |
-| **OpenRouter** | 50 req/día sin saldo | varía | +20 modelos gratis, calidad variable, útil para probar. |
-| **Cerebras** | ~1M tokens/día | varía | |
-| Cloudflare Workers AI | — | 2K–8K | Contexto muy chico, no sirve para leer páginas enteras. |
-
-## Fastify vs. NestJS
-
-Fastify (no NestJS): el proyecto tiene dos puntos de entrada livianos (API y
-worker) que comparten funciones simples — NestJS agregaría DI, módulos y
-decoradores pensados para equipos grandes, que aquí serían peso muerto. Ver
-el hilo anterior de este README (commits previos) para el detalle completo.
-
-## Estructura
-
-```
-src/
-├── main.ts                 # arranca la API (Fastify)
-├── worker.ts                # arranca el trigger de fuentes + tarea de vencimiento
-├── config/env.ts             # variables de entorno validadas con zod
-├── db/prisma.ts               # instancia única de Prisma Client
-├── ai/gemini.ts                # cliente Gemini + validación zod de la respuesta
-├── scraping/fetchers.ts         # fetch + cheerio (HTML) / fetch JSON (api)
-├── jobs/
-│   ├── scheduler.ts               # EL trigger: tick cada SCHEDULER_TICK_MS
-│   └── escanear-fuente.ts          # pipeline de un escaneo (ver diagrama)
-├── schemas/                  # validación de entrada (zod) por entidad
-├── services/
-│   └── convocatorias.ts        # LA máquina de estados: única puerta para
-│                                 # cambiar convocatorias.estado (ver abajo)
-└── http/
-    ├── server.ts                # arma la app Fastify y registra rutas
-    ├── crud.ts                   # factory genérico de CRUD
-    ├── errors.ts, serialize.ts
-    └── routes/                   # un archivo por recurso
-```
-
-## Guía de revisión (bot + API)
-
-Lupe se usa por **Telegram** (no hay frontend aparte) y expone una **API REST** documentada con Swagger.
-
-### 1. Pruebas funcionales en Telegram
-
-- Bot: `https://t.me/lupe_asisco_bot` — escribir `/start`.
-- El bot responde a los IDs de `TELEGRAM_ALLOWED_USER_IDS`; si esa lista está vacía, queda abierto a cualquier usuario (así está en la revisión). Un usuario no autorizado recibe su propio ID para pedir acceso.
-- Comandos: `/pendientes` (convocatorias por aprobar, con botones ✅ Aprobar / ❌ Descartar), `/convocatoria <id>`, `/documentos` (carpeta de la fundación), `/avisos`, `/resumen`, `/ayuda`.
-- Manejo de errores visible: `/convocatoria` con un id mal escrito, usuario no autorizado, PDF ilegible o presupuesto diario de IA agotado devuelven un mensaje claro, no un fallo.
-
-### 2. Pruebas técnicas del backend
-
-- Swagger UI: `https://lupe-d5f2.onrender.com/api-docs` · Spec JSON: `https://lupe-d5f2.onrender.com/api-docs.json` (importable en Postman: *Import → Link*; o `npm run docs:export` genera `openapi.json`).
-- Autenticación: botón **Authorize** → clave en `x-api-key` (o `Authorization: Bearer <clave>`). Sin clave: `401`. Públicas: `/health`, `/api-docs*`, y `/telegram/webhook` (lo protege `TELEGRAM_WEBHOOK_SECRET`).
-- Códigos: `200/201/204` éxito · `400` validación (`details.fieldErrors` por campo) · `401` sin clave · `404` id inexistente · `409` transición/estado no permitido · `500` error interno. Todos los errores: `{ "error", "message", "details?" }`.
-- Prueba rápida:
+También funciona con Postman (*Import → Link* con la URL del JSON) o con `curl`:
 
 ```bash
 curl https://lupe-d5f2.onrender.com/health
 curl -H "x-api-key: <clave>" "https://lupe-d5f2.onrender.com/convocatorias?estado=pendiente_aprobacion&take=5"
-curl -X POST -H "x-api-key: <clave>" -H "content-type: application/json" -d '{}' https://lupe-d5f2.onrender.com/convocatorias   # → 400
 ```
 
-### 3. Integración con otros componentes
+## Arquitectura
 
-- Un servicio externo consume Lupe por la API REST con la API key (mismo contrato que Swagger). Contratos principales: `GET /convocatorias` (filtros `estado`, paginación `take/skip`), `POST /convocatorias/{id}/aprobar|descartar|transiciones`, `/postulaciones`, `/resultados`, `/adjudicaciones`, `/documentos-fundacion`.
-- Todos comparten la misma base de datos (Supabase/Postgres vía Prisma): el **worker** (`npm run worker`) escanea las fuentes (SECOP II) y deja convocatorias en `pendiente_aprobacion`; el **bot** las muestra y notifica; la **API** las expone.
-- Procesos desplegados en Render: web (`node dist/main.js`: API + bot por webhook) en https://lupe-d5f2.onrender.com y worker (`node dist/worker.js`, solo un health mínimo) en https://lupe-2.onrender.com.
+```mermaid
+flowchart LR
+    subgraph fuentes["Fuentes"]
+        S1["SECOP II<br/>(datos.gov.co)"]
+        S2["Páginas de la Alcaldía"]
+    end
 
-## Endpoints
+    subgraph render["Render"]
+        W["Worker<br/>src/worker.ts"]
+        WEB["Servicio web<br/>API REST + Bot<br/>src/main.ts"]
+    end
 
-Toda petición (salvo `GET /health`) lleva la clave de `API_KEY` en el header
-`x-api-key` (o `Authorization: Bearer <clave>`); sin ella la API responde 401.
-`API_KEY` es obligatoria en producción; en desarrollo, si falta, la API queda
-abierta y lo avisa en el log.
+    DB[("PostgreSQL<br/>Supabase")]
+    G["Google Gemini"]
+    TG["Telegram"]
+    U["👩 Directora<br/>de la fundación"]
+    EXT["Otros servicios<br/>(Swagger, Postman...)"]
 
-CRUD estándar (`GET /recurso`, `GET /recurso/:id`, `POST`, `PATCH /:id`,
-`DELETE /:id`, con `?take=&skip=` para paginar):
+    W -->|"cron vencido"| S1
+    W --> S2
+    W -->|"texto de páginas"| G
+    W -->|"guarda convocatorias"| DB
+    WEB <-->|"lee y escribe"| DB
+    WEB -->|"lee PDF y capturas"| G
+    U <-->|"mensajes y botones"| TG
+    TG <-->|"webhook"| WEB
+    EXT -->|"HTTP + API key"| WEB
+```
 
-- `/fuentes`
-- `/convocatorias` (POST acepta `estadoInicial: "detectada" | "no_apta"`)
-- `/adjudicaciones`
-- `/recordatorios`
-- `/documentos-fundacion` — carpeta digital de la fundación (RUT, certificados...)
-- `/convocatoria-documentos` — qué documento pide cada convocatoria puntual
+**Dos procesos, una base de datos.** El **worker** escanea y guarda; el **servicio web** sirve la API REST y el bot (por webhook en producción, por long polling en local). Solo el servicio web habla con Telegram.
 
-Solo lectura (las escribe el sistema: worker, agentes):
+Cómo trabaja un escaneo (`src/jobs/escanear-fuente.ts`):
 
-- `/convocatoria-eventos`, `/escaneos`
+```mermaid
+flowchart TD
+    T["Tick del scheduler<br/>cada SCHEDULER_TICK_MS"] --> F{"¿cron de la fuente<br/>vencido?"}
+    F -->|no| T
+    F -->|sí| M{"fuente.modo"}
+    M -->|api| A["Mapeo directo<br/>(sin IA)"]
+    M -->|pagina_unica| H{"¿cambió el hash<br/>del contenido?"}
+    H -->|no| L1["Bitácora: sin cambios<br/>(no gasta IA)"]
+    H -->|sí| G["Gemini → JSON + zod"]
+    A --> C["Candidatos"]
+    G --> C
+    C --> D{"¿la huella ya existe?"}
+    D -->|sí| X["Se ignora"]
+    D -->|no| N["Nueva convocatoria<br/>detectada → pendiente_aprobacion"]
+    N --> B["Bot avisa con<br/>✅ Aprobar / ❌ Descartar"]
+```
 
-### Autorización sin tabla de usuarios
+## Ciclo de vida de una convocatoria
 
-v2 no tiene `usuarios_telegram` ni `chat_messages`: nadie queda registrado
-como "quién hizo qué", solo si el cambio vino de `sistema` o de `usuaria`
-(`convocatoria_eventos.origen`). La autorización del bot (fase 3) se resuelve
-aparte, comparando el `chat_id` de Telegram contra `TELEGRAM_ALLOWED_USER_IDS`
-en `.env` (ver `config/env.ts#allowedTelegramUserIds`) — no contra una tabla.
-
-### El flujo inicial: ciclo de vida de una convocatoria
-
-Todo cambio de estado pasa por `services/convocatorias.ts`, que valida la
-tabla de "Transiciones permitidas" del documento de diseño y escribe el
-evento en `convocatoria_eventos` en la misma transacción:
+Todo cambio de estado pasa por `src/services/convocatorias.ts`, que valida las transiciones permitidas y guarda el evento en `convocatoria_eventos` (auditoría) dentro de la misma transacción. Una transición no permitida responde `409`.
 
 ```
 detectada → pendiente_aprobacion → aprobada → en_postulacion → postulada → ganada | no_ganada
                                                                       ↘ no_apta / descartada / vencida (salidas alternas)
 ```
 
-- `GET /convocatorias/:id/transiciones` — qué estados siguientes son válidos.
-- `POST /convocatorias/:id/transiciones` — transición genérica `{ estado, origen?, nota? }`.
-- `POST /convocatorias/:id/aprobar` / `/descartar` — atajos de la directora (`origen=usuaria`).
-- `GET /convocatorias/:id/eventos` — historial de estado (auditoría).
-- `GET|POST /convocatorias/:id/pasos` y `POST .../pasos/:pasoId/completar` —
-  paso a paso de la postulación; completar el primer paso con la
-  convocatoria en `aprobada` dispara automáticamente `en_postulacion`.
-- `GET /convocatorias/:id/documentos` — qué documentos pide, y si ya están listos.
-- `POST /postulaciones` — "🎒 Ya radicamos": crea `postulaciones` +
-  `resultados` (pendiente) y mueve la convocatoria a `postulada`.
-- `POST /resultados/:id/registrar` — "/resultado": registra
-  `ganada`/`no_ganada` y mueve la convocatoria al estado final.
-- `POST /adjudicaciones` — solo permite adjudicar un resultado `ganada`
-  (refleja la FK compuesta `(resultado_id, resultado_estado)` del modelo);
-  `montoRecibido` reemplaza a la antigua tabla `desembolsos`.
+Cada evento queda marcado con su origen: `sistema` (worker) o `usuaria` (decisión humana en el bot).
 
-## Explorador: paso a paso desde los documentos
+## API REST
 
-La página de detalle de un proceso en SECOP II está protegida con reCAPTCHA, así
-que Lupe no la lee sola. En su lugar, la directora (o quien prepare la
-postulación) descarga los documentos y se los manda al bot:
+La referencia completa e interactiva está en [Swagger](https://lupe-d5f2.onrender.com/api-docs). Resumen:
 
-1. En SECOP, abrir el proceso y descargar el pliego, la invitación o los
-   "Documentos Precontractuales" (PDF, máximo 20 MB).
-2. Si el pliego dice que el cronograma está en la plataforma, tomar una captura
-   de la sección **Cronograma** de la página del proceso.
-3. En Telegram, mantener presionada la tarjeta de la convocatoria → *Responder*,
-   y adjuntar el PDF y la captura (pueden ir juntos).
+**Autenticación.** Toda petición, salvo `/health`, `/api-docs*` y `/telegram/webhook`, lleva la clave en `x-api-key: <clave>` o `Authorization: Bearer <clave>` (son equivalentes). Sin ella: `401`. `API_KEY` es obligatoria en producción; en desarrollo, si falta, la API queda abierta y lo avisa en el log. El webhook de Telegram se protege aparte con `TELEGRAM_WEBHOOK_SECRET`.
 
-El bot (`src/bot/documentos.ts`) junta los archivos de un mismo envío, los lee
-con `MODELO_EXPLORADOR` (`src/ai/explorador.ts`, Gemini lee PDF e imágenes) y
-guarda (`src/explorador/aplicar.ts`):
+**Formato de error.** Siempre `{ "error": "...", "message": "...", "details": ... }`.
 
-- `convocatorias.fecha_cierre`, marcada como confirmada si su cita aparece en el
-  texto del PDF (`src/explorador/citas.ts`), o "tomada de la captura" si vino de
-  una imagen, que no se puede verificar.
-- El cronograma como `convocatoria_pasos` (se conservan los pasos ya completados).
-- Los documentos exigidos como `convocatoria_documentos`, marcados como listos si
-  la fundación ya tiene uno vigente del mismo tipo en `documentos_fundacion`.
-- Los requisitos habilitantes y criterios de evaluación en `convocatorias.requisitos`.
+| Código | Cuándo |
+|---|---|
+| `200` / `201` / `204` | Éxito (consulta / creación / borrado) |
+| `400` | Validación fallida; `details.fieldErrors` indica qué campo |
+| `401` | Falta la API key o es inválida |
+| `404` | El id no existe |
+| `409` | Transición o estado no permitido (p. ej. adjudicar un resultado que no es `ganada`) |
+| `500` | Error interno |
 
-Si después llegan más archivos de la misma convocatoria, se vuelven a leer todos
-juntos. Cada lectura queda en `escaneos` y cuenta para `MAX_TOKENS_DIA` (un
-pliego de ~60 páginas gasta ~35.000 tokens; una captura, ~3.000).
+**Recursos CRUD** (`GET /x`, `GET /x/{id}`, `POST /x`, `PATCH /x/{id}`, `DELETE /x/{id}`; los listados aceptan `?take=&skip=`):
+`/fuentes`, `/convocatorias` (filtros `estado`, `fuenteId`), `/postulaciones`, `/adjudicaciones`, `/recordatorios`, `/documentos-fundacion`, `/convocatoria-documentos`.
 
-## Carpeta de la fundación (`/documentos` en el bot)
+**Solo lectura** (los escribe el sistema): `/convocatoria-eventos`, `/escaneos`.
 
-Menú con los documentos de la fundación (`documentos_fundacion`): RUT, cámara de
-comercio, cédula del representante legal, antecedentes, estados financieros...
-Cada uno muestra su estado (✅ vigente, ⚠️ vence en menos de 30 días, ❌ vencido,
-📄 sin fecha). Desde el bot se puede:
+**Acciones del flujo:**
 
-- **Subir** uno nuevo: elegir el tipo y enviar el PDF o la foto.
-- **Ver** uno: el bot reenvía el archivo con su ficha.
-- **Reemplazar** el archivo (por ejemplo, un certificado renovado).
-- **Editar** el nombre y las fechas de expedición y vencimiento.
-- **Eliminar** (pide confirmación).
+| Endpoint | Qué hace |
+|---|---|
+| `GET /convocatorias/{id}/transiciones` | Estados siguientes válidos |
+| `POST /convocatorias/{id}/transiciones` | Transición genérica `{ estado, origen?, nota? }` |
+| `POST /convocatorias/{id}/aprobar` · `/descartar` | Decisión de la directora (`origen = usuaria`) |
+| `GET /convocatorias/{id}/eventos` | Historial de estados |
+| `GET·POST /convocatorias/{id}/pasos` · `POST …/pasos/{pasoId}/completar` | Paso a paso de la postulación; completar el primero dispara `en_postulacion` |
+| `GET /convocatorias/{id}/documentos` | Documentos exigidos y si ya están listos |
+| `POST /postulaciones` | "Ya radicamos": crea la postulación y un resultado pendiente, y pasa la convocatoria a `postulada` |
+| `POST /resultados/{id}/registrar` | Registra `ganada` / `no_ganada` |
+| `POST /adjudicaciones` | Solo para resultados `ganada`; `montoRecibido` lleva el dinero recibido |
 
-`src/services/documentosFundacion.ts` mantiene sincronizadas las convocatorias: al
-subir un documento, las `convocatoria_documentos` de ese tipo que estaban
-pendientes pasan a "listo"; al eliminarlo, vuelven a "pendiente". Los archivos
-viven en Telegram (se guarda su `file_id`, que es propio de cada bot: lo subido
-con el bot de desarrollo no se ve desde el de producción).
+## Integración con otros servicios
 
-## Avisos automáticos (resumen diario)
+- **Contrato:** la especificación OpenAPI 3 en `/api-docs.json` (también `npm run docs:export` → `openapi.json`). Se puede importar en Postman o generar un cliente.
+- **Acceso:** HTTPS + API key. Cada servicio consumidor debería tener su propia clave si se quiere poder revocarla por separado (hoy hay una sola `API_KEY`).
+- **Datos compartidos:** worker, bot y API leen y escriben la misma base Postgres (vía Prisma); un cambio hecho por cualquiera es visible para los demás.
+- **Lectura típica:** `GET /convocatorias?estado=pendiente_aprobacion`. **Escritura típica:** `POST /convocatorias/{id}/aprobar`.
 
-Todos los días a la hora de `AVISOS_CRON` (por defecto 7:30 a. m., media hora
-después del escaneo de SECOP) el bot manda un resumen con las convocatorias que
-llegaron a pendientes de aprobación desde el resumen anterior: cuántas son
-abiertas a propuestas (🟢) y cuántas son de referencia (🔒 ya asignadas o de
-convenio directo), con un botón para verlas. Si no llegó nada, no escribe.
+## Ejecutar en local
 
-- `/avisos`: ver si están activos y prenderlos o apagarlos.
-- `/resumen`: el resumen de las últimas 24 horas, en el momento.
-- `TELEGRAM_AVISOS_CHAT_IDS`: quién los recibe al arrancar el bot (por ejemplo, el
-  ID de Consuelo). Lo que cada quien cambie con `/avisos` vive en memoria: al
-  reiniciar o redesplegar el bot, vuelve a esta lista.
+Requisitos: Node.js 22, una base Postgres (se usa Supabase) y, para la IA, una clave de [Google AI Studio](https://aistudio.google.com/apikey).
 
-El resumen lo manda el proceso del bot (`src/bot/avisos.ts`), no el worker, para
-que solo un proceso hable con Telegram; lee lo que el worker dejó en la base, así
-que sin el worker corriendo no habrá convocatorias nuevas que avisar.
+```bash
+npm install
+cp .env.example .env             # completa DATABASE_URL, API_KEY, TELEGRAM_BOT_TOKEN, GEMINI_API_KEY
+npx prisma generate
+npx prisma migrate dev           # crea las tablas
+psql "$DATABASE_URL" -f prisma/views/vw_finanzas_convocatorias.sql   # vista de finanzas
 
-## Historial del modelo (v1 → v2)
+npm run dev       # API + bot → http://localhost:3000 (Swagger en /api-docs)
+npm run worker    # scheduler de fuentes (otra terminal)
+npm test          # pruebas (vitest)
+```
 
-- `fuentes.modo` gana `"api"` (datos abiertos, ej. SECOP II vía datos.gov.co).
-- `convocatorias` gana `numero_proceso`; pierde `documentos_requeridos`
-  (ahora es relacional: `convocatoria_documentos` + `documentos_fundacion`).
-- Se quitan `usuarios_telegram`, `chat_messages` y `desembolsos`. Los FK de
-  "quién lo hizo" (`aprobada_por`, `radicada_por`, `registrado_por`,
-  `completado_por`) se reemplazan por `convocatoria_eventos.origen`
-  (`sistema` | `usuaria`). `adjudicaciones.monto_recibido` reemplaza a
-  `desembolsos` para calcular `saldo_por_recibir` en la vista de finanzas.
+Sin `PUBLIC_URL` y `TELEGRAM_WEBHOOK_SECRET` el bot usa long polling; con ambos, webhook. No corras dos instancias con el mismo token en modo polling: se pisan.
 
-## Pendiente para las siguientes fases
+**Producción (Render):** el servicio web ejecuta `node dist/main.js` (API + bot) y el worker `node dist/worker.js`. El `Dockerfile` construye la imagen; las migraciones se aplican con `npm run db:deploy`.
 
-- Verificación de citas en la lectura de páginas web (`pagina_unica`); en el
-  explorador de documentos ya se verifica la fecha de cierre contra el PDF.
-- Descargar solo los documentos de SECOP desde datos.gov.co (conjunto
-  `dmgg-8hin`) para no depender de que la directora los mande.
+<details>
+<summary><b>Conectar a Supabase (detalle)</b></summary>
+
+Prisma habla Postgres directo, no la API/SDK de Supabase, así que solo hace falta `DATABASE_URL`: Supabase → *Project Settings → Database → Connection string* → variante **Session pooler** (puerto 5432). Es compatible con redes solo IPv4 y soporta prepared statements. Evita el *Transaction pooler* (6543): rompe `prisma migrate` salvo que agregues `DIRECT_URL` y `directUrl` en `datasource db`.
+
+Las variables `SUPABASE_*` están reservadas para Storage o Auth futuros; hoy nada en `src/` las usa.
+</details>
+
+## Variables de entorno
+
+Plantilla completa con comentarios en [`.env.example`](.env.example).
+
+| Variable | Para qué |
+|---|---|
+| `DATABASE_URL` | Conexión Postgres (obligatoria) |
+| `API_KEY` | Clave de la API REST, mínimo 32 caracteres (obligatoria en producción) |
+| `TELEGRAM_BOT_TOKEN` | Token del bot; sin él, el bot no arranca |
+| `TELEGRAM_WEBHOOK_SECRET`, `PUBLIC_URL` | Activan el modo webhook |
+| `TELEGRAM_ALLOWED_USER_IDS` | IDs autorizados, separados por coma (vacío = abierto) |
+| `TELEGRAM_AVISOS_CHAT_IDS`, `AVISOS_CRON` | Quién recibe el resumen diario y a qué hora (por defecto 7:30 a. m.) |
+| `GEMINI_API_KEY`, `MODELO_EVALUADOR`, `MODELO_EXPLORADOR` | IA |
+| `MAX_TOKENS_DIA` | Tope diario de tokens de IA |
+| `SCHEDULER_TICK_MS` | Cada cuánto el worker revisa qué fuentes tocan |
+
+## Estructura del código
+
+```
+src/
+├── main.ts · worker.ts        # puntos de entrada: API + bot / scheduler
+├── config/env.ts              # variables de entorno validadas con zod
+├── http/                      # Fastify: server, auth por API key, CRUD genérico, rutas por recurso
+├── docs/swagger.ts            # especificación OpenAPI 3
+├── bot/                       # bot de Telegram (grammY): comandos, avisos, carpeta, documentos
+├── jobs/                      # scheduler y pipeline de escaneo de fuentes
+├── scraping/                  # fetch + cheerio (HTML) y SECOP II (API)
+├── ai/                        # Gemini: evaluador, explorador de PDF, presupuesto, reintentos
+├── explorador/                # aplica al modelo lo que se leyó de los pliegos
+├── elegibilidad/              # reglas de elegibilidad frente al perfil de la fundación
+├── services/                  # máquina de estados y sincronización de documentos
+├── schemas/                   # validación de entrada (zod) por entidad
+└── db/prisma.ts               # Prisma Client
+prisma/                        # esquema, migraciones y vista de finanzas
+test/                          # pruebas con vitest
+```
+
+## Decisiones técnicas
+
+- **Stack:** Node.js 22, TypeScript, Fastify, Prisma 7 (adapter `pg`), zod, grammY, Gemini.
+- **Fastify y no NestJS:** son dos puntos de entrada livianos que comparten funciones simples; NestJS agregaría módulos e inyección de dependencias que aquí serían peso muerto.
+- **Un `setInterval` y no una cola (pg-boss):** con pocas fuentes y revisión diaria basta un tick que compara el `cron` de cada fuente con `ultimo_escaneo_at`. El pipeline está aislado para cambiar el trigger sin tocar nada más.
+- **Gemini:** nivel gratuito real y contexto largo (lee un pliego completo). La respuesta siempre se valida con zod; nunca se confía en el modelo a ciegas. Plan B documentado: Groq, OpenRouter, Cerebras (`IA_PROVIDER`).
+- **Privacidad:** los documentos de la fundación (RUT, cédulas…) nunca se envían al evaluador de convocatorias; viven en Telegram (se guarda su `file_id`) y solo el explorador lee lo que la directora envía a propósito.
+- **Humano en el ciclo:** toda convocatoria pasa por aprobación de la directora; la IA propone, no decide.
+- **Sin tabla de usuarios:** la autorización del bot compara el ID de Telegram con `TELEGRAM_ALLOWED_USER_IDS`, y el historial solo distingue `sistema` de `usuaria`.
+- **SECOP y reCAPTCHA:** la página de detalle de un proceso en SECOP II está protegida, así que los pliegos los envía la directora al bot.
+
+## Pendiente
+
+- Verificar las citas de la IA al leer páginas web (en los PDF ya se verifica la fecha de cierre).
+- Descargar automáticamente los documentos de SECOP desde datos.gov.co (conjunto `dmgg-8hin`).
 - Agente explorador multi-página (modo `exploracion`, hoy lanza "no implementado").
-- Cambiar el `setInterval` del worker por pg-boss si el número de fuentes crece.
+- Cambiar el `setInterval` por pg-boss si el número de fuentes crece.
+- Una API key por servicio consumidor, para poder revocarlas por separado.
