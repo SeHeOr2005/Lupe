@@ -265,10 +265,3 @@ test/                          # pruebas con vitest
 - **Sin tabla de usuarios:** la autorización del bot compara el ID de Telegram con `TELEGRAM_ALLOWED_USER_IDS`, y el historial solo distingue `sistema` de `usuaria`.
 - **SECOP y reCAPTCHA:** la página de detalle de un proceso en SECOP II está protegida, así que los pliegos los envía la directora al bot.
 
-## Pendiente
-
-- Verificar las citas de la IA al leer páginas web (en los PDF ya se verifica la fecha de cierre).
-- Descargar automáticamente los documentos de SECOP desde datos.gov.co (conjunto `dmgg-8hin`).
-- Agente explorador multi-página (modo `exploracion`, hoy lanza "no implementado").
-- Cambiar el `setInterval` por pg-boss si el número de fuentes crece.
-- Una API key por servicio consumidor, para poder revocarlas por separado.
