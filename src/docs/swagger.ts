@@ -41,8 +41,9 @@ const spec: OpenAPIV3.Document = {
     contact: { name: "Equipo Integrador" },
   },
   servers: [
+    // Swagger UI preselecciona el primer servidor: producción va primero.
+    ...(process.env.PUBLIC_URL ? [{ url: process.env.PUBLIC_URL.replace(/\/$/, ""), description: "Producción" }] : []),
     { url: "http://localhost:3000", description: "Desarrollo local" },
-    ...(process.env.PUBLIC_URL ? [{ url: process.env.PUBLIC_URL, description: "Producción" }] : []),
   ],
   components: {
     securitySchemes: {
