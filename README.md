@@ -34,8 +34,9 @@ Detrás del bot hay un backend con una API REST (documentada con Swagger), un wo
 2. **Entiende.** Gemini extrae título, entidad, fechas y monto de las páginas; los datos se validan con zod antes de guardarse. SECOP casi no gasta IA porque ya viene estructurado.
 3. **Avisa.** Las convocatorias nuevas llegan a Telegram con botones **✅ Aprobar / ❌ Descartar**, y cada mañana se envía un resumen.
 4. **Prepara la postulación.** Al aprobar una convocatoria, la directora manda el pliego en PDF (y una captura del cronograma): el bot lee los documentos y arma el paso a paso, la fecha de cierre y la lista de documentos exigidos.
-5. **Controla los documentos de la fundación.** RUT, cámara de comercio, cédulas, etc., con su estado (✅ vigente, ⚠️ por vencer, ❌ vencido) y cruzados con lo que pide cada convocatoria.
-6. **Da seguimiento.** Registra la radicación, el resultado (ganada / no ganada) y la adjudicación con el monto recibido.
+5. **Recibe convocatorias de otras fuentes.** Las que le llegan a la directora por correo o WhatsApp (fundaciones empresariales, ICBF, cooperación) las agrega mandándole al bot el PDF, una captura o el enlace: Lupe identifica la convocatoria y la deja en pendientes con su paso a paso.
+6. **Controla los documentos de la fundación.** RUT, cámara de comercio, cédulas, etc., con su estado (✅ vigente, ⚠️ por vencer, ❌ vencido) y cruzados con lo que pide cada convocatoria.
+7. **Da seguimiento.** Registra la radicación, el resultado (ganada / no ganada) y la adjudicación con el monto recibido.
 
 ## Cómo probarlo
 
@@ -47,12 +48,15 @@ Abrir [@lupe_asisco_bot](https://t.me/lupe_asisco_bot) y escribir `/start`.
 |---|---|
 | `/pendientes` | Convocatorias esperando decisión, con botones ✅ Aprobar / ❌ Descartar |
 | `/convocatoria <id>` | Muestra una convocatoria puntual |
+| `/nueva` | Agregar una convocatoria que llegó por otro lado: enviar su PDF, una captura o el enlace |
 | `/documentos` | Carpeta de la fundación: ver, subir, reemplazar, editar o eliminar documentos |
 | `/avisos` | Activa o desactiva el resumen diario |
 | `/resumen` | Convocatorias nuevas de las últimas 24 horas |
 | `/ayuda` | Lista de comandos |
 
 Para ver el análisis de documentos: mantener presionada la tarjeta de una convocatoria → *Responder* → adjuntar el PDF del pliego.
+
+Para agregar una convocatoria nueva: `/nueva` y enviar el PDF, la captura o el enlace (también sirve mandarlo sin comando: el bot pregunta si es nueva). Si ya estaba en Lupe, no se duplica. Quedan bajo la fuente desactivada *"Agregadas desde Telegram"*, que el escaneo no recorre y la re-evaluación por perfil no toca. Los enlaces solo pueden ser direcciones públicas (http/https); los de Google Drive se convierten en descarga directa.
 
 **Acceso:** solo los IDs de Telegram listados en `TELEGRAM_ALLOWED_USER_IDS` pueden usar el bot; si la lista está vacía, queda abierto a cualquiera. Quien no tenga permiso recibe un mensaje con su propio ID para pedir acceso.
 

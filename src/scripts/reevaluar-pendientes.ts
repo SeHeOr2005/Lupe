@@ -17,6 +17,7 @@ import { elegibilidadComoJson, evaluarLote } from "../elegibilidad/evaluar.js";
 import { transicionarConvocatoria } from "../services/convocatorias.js";
 import { consultarEstadosSecop, type EstadoSecop } from "../scraping/secop.js";
 import type { Hallazgo } from "../jobs/hallazgo.js";
+import { FUENTE_MANUAL } from "../explorador/nueva.js";
 
 const aplicar = process.argv.includes("--aplicar");
 
@@ -24,7 +25,8 @@ const comoObjeto = (v: unknown): Record<string, unknown> =>
   v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 
 const convocatorias = await prisma.convocatoria.findMany({
-  where: { estado: { in: ["pendiente_aprobacion", "no_apta"] } },
+  // Las que la directora agregó a mano desde el bot no se re-evalúan: las escogió ella.
+  where: { estado: { in: ["pendiente_aprobacion", "no_apta"] }, fuente: { nombre: { not: FUENTE_MANUAL } } },
   orderBy: { fechaApertura: "desc" },
 });
 console.log(`${convocatorias.length} convocatorias clasificadas por el sistema. Evaluando...`);

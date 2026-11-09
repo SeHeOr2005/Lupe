@@ -129,6 +129,7 @@ export const TEXTO_AYUDA = [
   "",
   "/pendientes — convocatorias que esperan tu aprobación",
   "/convocatoria &lt;id&gt; — ver una convocatoria puntual",
+  "/nueva — agregar una convocatoria que te llegó por otro lado (PDF, captura o enlace)",
   "/documentos — carpeta de la fundación: ver, subir, actualizar o eliminar documentos",
   "/avisos — activar o desactivar el resumen diario de convocatorias nuevas",
   "/resumen — convocatorias nuevas de las últimas 24 horas",
@@ -173,9 +174,22 @@ export function textoPedirDocumentos(c: { id: string; urlOrigen: string; analisi
 }
 
 export const TEXTO_SIN_CONVOCATORIA = [
-  "¿De qué convocatoria es este archivo?",
-  "Mantén presionada la tarjeta de la convocatoria → <i>Responder</i>, y vuelve a adjuntarlo.",
-  "También sirve escribir su id en el pie del archivo.",
+  "¿De qué convocatoria es esto?",
+  "• Si es de una que ya está en Lupe: mantén presionada su tarjeta → <i>Responder</i>, y vuelve a enviarlo.",
+  "• Si es una convocatoria nueva que te llegó por otro lado, toca el botón y la agrego.",
+].join("\n");
+
+/** Instrucciones de /nueva: agregar una convocatoria que no salió de SECOP. */
+export const TEXTO_NUEVA = [
+  "➕ <b>Agregar una convocatoria</b>",
+  "",
+  "Envíame lo que tengas de ella:",
+  "• el PDF (términos de referencia, invitación, pliego),",
+  "• una captura de pantalla, o",
+  "• el enlace a la página donde se publica.",
+  "",
+  "Saco el nombre, la entidad, la fecha de cierre, los pasos y los documentos que piden, y la dejo en pendientes.",
+  "<i>Escribe /cancelar si te arrepientes.</i>",
 ].join("\n");
 
 export const NOMBRE_TIPO: Record<string, string> = {

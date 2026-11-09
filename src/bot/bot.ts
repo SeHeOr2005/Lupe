@@ -10,6 +10,8 @@ import { aprobarConvocatoria, descartarConvocatoria } from "../services/convocat
 import { HttpError } from "../http/errors.js";
 import { registrarRecepcionDeDocumentos } from "./documentos.js";
 import { registrarCarpeta } from "./carpeta.js";
+import { botonesDecision } from "./teclados.js";
+import { archivosPrevios } from "../explorador/aplicar.js";
 import { crearAvisos } from "./avisos.js";
 import { EsperaDeDocumentos } from "./espera.js";
 import {
@@ -31,9 +33,6 @@ const ETIQUETA_ESTADO: Record<string, string> = {
   descartada: "❌ <b>Descartada</b>",
 };
 
-function botonesDecision(id: string) {
-  return new InlineKeyboard().text("✅ Aprobar", `${ACCION.aprobar}:${id}`).text("❌ Descartar", `${ACCION.descartar}:${id}`);
-}
 
 function nombreDe(ctx: Context): string {
   return ctx.from?.first_name ?? `usuario ${ctx.from?.id ?? "?"}`;
@@ -84,13 +83,18 @@ async function decidir(ctx: Context, accion: "aprobar" | "descartar", id: string
     });
 
     if (accion === "aprobar" && ctx.chat) {
+      espera.marcar(ctx.chat.id, c.id);
+      if ((await archivosPrevios(c.id)).length > 0) {
+        // Ya se leyeron sus documentos (por ejemplo, si se agregó desde el bot con su PDF).
+        await ctx.reply("📄 Ya tengo sus documentos y su paso a paso. Si te llega un anexo o una adenda, respóndeme con él aquí.");
+        return;
+      }
       // force_reply abre la respuesta a este mensaje: basta con adjuntar el PDF.
       await ctx.reply(textoPedirDocumentos(c), {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
         reply_markup: { force_reply: true, input_field_placeholder: "Adjunta el PDF del pliego" },
       });
-      espera.marcar(ctx.chat.id, c.id);
     }
   } catch (err) {
     // 409: alguien ya la decidió (otra persona del equipo, u otro mensaje viejo). 404: ya no existe.
@@ -154,6 +158,11 @@ export function crearBot(token: string): { bot: Bot; avisos: ReturnType<typeof c
   // manejador general: sus botones ("av:...") son suyos.
   const avisos = crearAvisos(bot);
 
+  // PDF, capturas o enlaces → paso a paso de una convocatoria, o una convocatoria nueva
+  // (/nueva). Antes del manejador general: su botón "nv:si" es suyo. Después de la
+  // carpeta: si la carpeta espera un archivo o /cancelar, ella va primero.
+  registrarRecepcionDeDocumentos(bot, token, espera);
+
   bot.on("callback_query:data", async (ctx) => {
     const leida = leerAccion(ctx.callbackQuery.data);
     if (!leida) {
@@ -169,9 +178,6 @@ export function crearBot(token: string): { bot: Bot; avisos: ReturnType<typeof c
     await decidir(ctx, leida.accion, leida.valor, espera);
   });
 
-  // PDF o capturas de una convocatoria → paso a paso, fecha de cierre y documentos exigidos.
-  registrarRecepcionDeDocumentos(bot, token, espera);
-
   bot.on("message", (ctx) => ctx.reply("No entendí. Escribe /ayuda para ver lo que puedo hacer."));
 
   bot.catch((err) => {
@@ -186,6 +192,7 @@ export async function registrarComandos(bot: Bot) {
   await bot.api.setMyCommands([
     { command: "pendientes", description: "Convocatorias que esperan aprobación" },
     { command: "convocatoria", description: "Ver una convocatoria por id" },
+    { command: "nueva", description: "Agregar una convocatoria (PDF, captura o enlace)" },
     { command: "documentos", description: "Carpeta de la fundación: ver, subir, actualizar" },
     { command: "avisos", description: "Activar o desactivar el resumen diario" },
     { command: "resumen", description: "Convocatorias nuevas de las últimas 24 horas" },

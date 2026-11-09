@@ -27,13 +27,15 @@ export function hashTexto(texto: string): string {
 export async function fetchHtml(url: string): Promise<ContenidoDescargado> {
   const res = await fetch(url, { headers: { "User-Agent": UA } });
   if (!res.ok) throw new Error(`GET ${url} → ${res.status} ${res.statusText}`);
-  const html = await res.text();
+  const texto = textoLimpioDeHtml(await res.text());
+  return { texto, hash: hashTexto(texto) };
+}
 
+/** Solo el texto visible de una página: sin scripts, estilos ni menús. */
+export function textoLimpioDeHtml(html: string): string {
   const $ = cheerio.load(html);
   $("script, style, noscript, svg, nav, footer").remove();
-  const texto = $("body").text().replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n").trim();
-
-  return { texto, hash: hashTexto(texto) };
+  return $("body").text().replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n").trim();
 }
 
 /** Datos abiertos (ej. datos.gov.co / SECOP II): la respuesta JSON, como texto para la huella. */

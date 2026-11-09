@@ -27,6 +27,9 @@ export const TIPOS_DOCUMENTO = [
 ] as const;
 
 const extraccionSchema = z.object({
+  /** Nombre de la convocatoria y quién la abre: solo se piden cuando aún no se conocen. */
+  titulo: z.string().optional(),
+  entidad: z.string().optional(),
   resumen: z.string().optional(),
   presupuesto: z.number().optional(),
   /** Fecha y hora límite para presentar la propuesta, hora de Colombia: "YYYY-MM-DDTHH:mm" o "YYYY-MM-DD". */
@@ -54,6 +57,8 @@ export type ExtraccionDocumentos = z.infer<typeof extraccionSchema>;
 const EXTRACCION_JSON_SCHEMA = {
   type: "object",
   properties: {
+    titulo: { type: "string", description: "nombre de la convocatoria, tal como la llama quien la abre" },
+    entidad: { type: "string", description: "entidad, fundación u organización que abre la convocatoria" },
     resumen: { type: "string", description: "qué se va a contratar o apoyar, en 1 o 2 frases" },
     presupuesto: { type: "number", description: "presupuesto oficial o valor máximo, en pesos" },
     fechaCierre: {
@@ -96,12 +101,12 @@ const EXTRACCION_JSON_SCHEMA = {
 };
 
 const PROMPT_EXPLORADOR = `Eres el explorador de Lupe. Una fundación sin ánimo de lucro de Manizales
-(Colombia) va a postularse a esta convocatoria pública y te pasa sus documentos: pliego
-o invitación, estudios previos, anexos y, a veces, capturas de pantalla de la página del
-proceso en SECOP II (por ejemplo, de la sección de cronograma).
+(Colombia) va a postularse a esta convocatoria (de una entidad pública, una fundación
+empresarial o de cooperación) y te pasa lo que tiene de ella: pliego o invitación,
+términos de referencia, estudios previos, anexos, el texto de su página web y, a veces,
+capturas de pantalla de la página del proceso en SECOP II (por ejemplo, del cronograma).
 
-Convocatoria: {{titulo}}
-Entidad: {{entidad}}
+{{contexto}}
 
 Extrae lo que la fundación necesita para preparar la postulación:
 - fechaCierre: fecha y hora límite para presentar la propuesta u oferta (en hora de Colombia).
@@ -135,11 +140,20 @@ function getClient(): GoogleGenAI {
   return client;
 }
 
+/**
+ * Lee los archivos de una convocatoria. Sin `contexto` (una convocatoria que la
+ * directora agrega desde el bot), el modelo también identifica su título y entidad.
+ */
 export async function leerDocumentos(
   archivos: ArchivoParaLeer[],
-  contexto: { titulo: string; entidad: string },
+  contexto?: { titulo: string; entidad: string },
 ): Promise<{ extraccion: ExtraccionDocumentos; tokensUsados: number }> {
-  const prompt = PROMPT_EXPLORADOR.replace("{{titulo}}", contexto.titulo).replace("{{entidad}}", contexto.entidad);
+  const prompt = PROMPT_EXPLORADOR.replace(
+    "{{contexto}}",
+    contexto
+      ? `Convocatoria: ${contexto.titulo}\nEntidad: ${contexto.entidad}`
+      : "Todavía no se sabe qué convocatoria es: identifica su nombre (titulo) y quién la abre (entidad). Si los archivos no describen ninguna convocatoria, deja titulo vacío.",
+  );
 
   // Si el explorador está saturado (503), se reintenta y luego se usa el modelo del evaluador.
   const response = await conModeloDeRespaldo([env.MODELO_EXPLORADOR, env.MODELO_EVALUADOR], (model) =>

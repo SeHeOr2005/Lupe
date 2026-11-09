@@ -10,18 +10,31 @@
  */
 import { prisma } from "../db/prisma.js";
 import { NotFoundError } from "../http/errors.js";
-import { leerDocumentos, type ArchivoParaLeer } from "../ai/explorador.js";
+import { leerDocumentos, type ArchivoParaLeer, type ExtraccionDocumentos } from "../ai/explorador.js";
 import { quedaCupoIa } from "../ai/presupuesto.js";
 import { normalizarParaCita, textoNormalizadoDePdf } from "./citas.js";
 import { armarPlan, type PlanDeGuardado, type TipoDocumento } from "./plan.js";
 
-/** Lo que se guarda de cada archivo para poder volver a descargarlo de Telegram. */
+/**
+ * Lo que se guarda de cada archivo para poder volver a leerlo: o viene de
+ * Telegram (su file_id) o de un enlace que mandó la directora (su url).
+ */
 export interface ArchivoGuardado {
   nombre: string;
   mimeType: string;
-  telegramFileId: string;
-  telegramFileUniqueId: string;
+  telegramFileId?: string;
+  telegramFileUniqueId?: string;
+  url?: string;
   tamano: number;
+}
+
+/** Identifica un archivo para no leerlo dos veces. */
+export const claveArchivo = (a: ArchivoGuardado) => a.telegramFileUniqueId ?? a.url ?? a.nombre;
+
+/** Una lectura con IA ya hecha (para no pagarla dos veces, ver explorador/nueva.ts). */
+export interface LecturaPrevia {
+  extraccion: ExtraccionDocumentos;
+  tokensUsados: number;
 }
 
 export interface ResultadoExploracion {
@@ -52,27 +65,41 @@ async function documentoVigente(tipo: TipoDocumento) {
   });
 }
 
+/** El texto de los archivos que se puede comparar con las citas: PDF y páginas web (no imágenes). */
+async function textoVerificable(archivos: ArchivoParaLeer[]): Promise<string> {
+  const textos = await Promise.all(
+    archivos.map((a) =>
+      a.mimeType === "application/pdf"
+        ? textoNormalizadoDePdf(a.datos).catch(() => "")
+        : a.mimeType === "text/plain"
+          ? normalizarParaCita(a.datos.toString("utf8"))
+          : "",
+    ),
+  );
+  return textos.join(" ");
+}
+
 export async function explorarConvocatoria(
   convocatoriaId: string,
   archivos: (ArchivoParaLeer & { meta: ArchivoGuardado })[],
+  lecturaPrevia?: LecturaPrevia,
 ): Promise<ResultadoExploracion> {
   const convocatoria = await prisma.convocatoria.findUnique({ where: { id: convocatoriaId } });
   if (!convocatoria) throw new NotFoundError("convocatoria", convocatoriaId);
 
-  const cupo = await quedaCupoIa();
-  if (!cupo.queda) throw new Error(`Se alcanzó el tope diario de IA (${cupo.usados}/${cupo.tope} tokens). Intenta mañana.`);
+  if (!lecturaPrevia) {
+    const cupo = await quedaCupoIa();
+    if (!cupo.queda) throw new Error(`Se alcanzó el tope diario de IA (${cupo.usados}/${cupo.tope} tokens). Intenta mañana.`);
+  }
 
   const inicioAt = new Date();
   let tokensUsados = 0;
   try {
-    const { extraccion, tokensUsados: t } = await leerDocumentos(archivos, {
-      titulo: convocatoria.titulo,
-      entidad: convocatoria.entidad,
-    });
+    const { extraccion, tokensUsados: t } =
+      lecturaPrevia ?? (await leerDocumentos(archivos, { titulo: convocatoria.titulo, entidad: convocatoria.entidad }));
     tokensUsados = t;
 
-    const pdfs = archivos.filter((a) => a.mimeType === "application/pdf");
-    const textoPdf = (await Promise.all(pdfs.map((a) => textoNormalizadoDePdf(a.datos).catch(() => "")))).join(" ");
+    const textoPdf = await textoVerificable(archivos);
     const plan = armarPlan(extraccion, { textoPdf, hayCapturas: archivos.some((a) => a.mimeType.startsWith("image/")) });
 
     const vigentes = new Map<TipoDocumento, { id: string } | null>();
@@ -156,7 +183,7 @@ export async function explorarConvocatoria(
 }
 
 /** La lectura gasta IA: queda en `escaneos` para que cuente en el tope diario (ver ai/presupuesto.ts). */
-async function registrarLectura(fuenteId: string, inicioAt: Date, archivos: number, tokensUsados: number, error?: unknown) {
+export async function registrarLectura(fuenteId: string, inicioAt: Date, archivos: number, tokensUsados: number, error?: unknown) {
   await prisma.escaneo.create({
     data: {
       fuenteId,
