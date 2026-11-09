@@ -35,8 +35,9 @@ Detrás del bot hay un backend con una API REST (documentada con Swagger), un wo
 3. **Avisa.** Las convocatorias nuevas llegan a Telegram con botones **✅ Aprobar / ❌ Descartar**, y cada mañana se envía un resumen.
 4. **Prepara la postulación.** Al aprobar una convocatoria, la directora manda el pliego en PDF (y una captura del cronograma): el bot lee los documentos y arma el paso a paso, la fecha de cierre y la lista de documentos exigidos.
 5. **Recibe convocatorias de otras fuentes.** Las que le llegan a la directora por correo o WhatsApp (fundaciones empresariales, ICBF, cooperación) las agrega mandándole al bot el PDF, una captura o el enlace: Lupe identifica la convocatoria y la deja en pendientes con su paso a paso.
-6. **Controla los documentos de la fundación.** RUT, cámara de comercio, cédulas, etc., con su estado (✅ vigente, ⚠️ por vencer, ❌ vencido) y cruzados con lo que pide cada convocatoria.
-7. **Da seguimiento.** Registra la radicación, el resultado (ganada / no ganada) y la adjudicación con el monto recibido.
+6. **Redacta borradores.** Carta de presentación y propuesta técnica en Word, a partir de lo que pide la convocatoria (sobre todo sus criterios de evaluación) y del perfil de la fundación. Lo que no sabe no lo inventa: lo deja como [campo] resaltado en amarillo, y lo que la convocatoria exige queda como [confirmar: …].
+7. **Controla los documentos de la fundación.** RUT, cámara de comercio, cédulas, etc., con su estado (✅ vigente, ⚠️ por vencer, ❌ vencido) y cruzados con lo que pide cada convocatoria.
+8. **Da seguimiento.** Registra la radicación, el resultado (ganada / no ganada) y la adjudicación con el monto recibido.
 
 ## Cómo probarlo
 
@@ -49,6 +50,7 @@ Abrir [@lupe_asisco_bot](https://t.me/lupe_asisco_bot) y escribir `/start`.
 | `/pendientes` | Convocatorias esperando decisión, con botones ✅ Aprobar / ❌ Descartar |
 | `/convocatoria <id>` | Muestra una convocatoria puntual |
 | `/nueva` | Agregar una convocatoria que llegó por otro lado: enviar su PDF, una captura o el enlace |
+| `/borrador` | Respondiendo a la tarjeta de una convocatoria: carta de presentación o propuesta técnica en Word (también con el botón **📝 Borradores**). Los datos institucionales (NIT, representante legal, dirección…) se llenan una vez en `src/config/perfil-fundacion.ts` → `DATOS_FUNDACION` |
 | `/documentos` | Carpeta de la fundación: ver, subir, reemplazar, editar o eliminar documentos |
 | `/avisos` | Activa o desactiva el resumen diario |
 | `/resumen` | Convocatorias nuevas de las últimas 24 horas |

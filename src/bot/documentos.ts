@@ -32,6 +32,7 @@ import {
 import { mensajeErrorIa } from "../ai/reintentos.js";
 import { EstadoPorChat, type EsperaDeDocumentos } from "./espera.js";
 import { botonesDecision } from "./teclados.js";
+import { botonBorradores } from "./borradores.js";
 
 /** Límite de Telegram para que un bot descargue un archivo. */
 const MAX_BYTES_ARCHIVO = 20 * 1024 * 1024;
@@ -157,10 +158,11 @@ export function registrarRecepcionDeDocumentos(bot: Bot, token: string, espera: 
         ? "📖 Leyendo la convocatoria para agregarla… puede tardar hasta un minuto."
         : "📖 Leyendo los documentos… puede tardar hasta un minuto.",
     );
-    const editar = (texto: string) =>
+    const editar = (texto: string, teclado?: InlineKeyboard) =>
       bot.api.editMessageText(p.chatId, aviso.message_id, recortarMensaje(texto), {
         parse_mode: "HTML",
         link_preview_options: { is_disabled: true },
+        ...(teclado ? { reply_markup: teclado } : {}),
       });
 
     try {
@@ -175,7 +177,7 @@ export function registrarRecepcionDeDocumentos(bot: Bot, token: string, espera: 
           await mostrarTarjeta(p.chatId, r.convocatoriaId, "Aquí está:");
           return;
         }
-        await editar(`➕ <b>Convocatoria agregada.</b>\n\n${resumenDe(r.exploracion)}`);
+        await editar(`➕ <b>Convocatoria agregada.</b>\n\n${resumenDe(r.exploracion)}`, botonBorradores(r.convocatoriaId));
         await mostrarTarjeta(p.chatId, r.convocatoriaId, "Quedó en pendientes. ¿La apruebas?");
         return;
       }
@@ -188,7 +190,7 @@ export function registrarRecepcionDeDocumentos(bot: Bot, token: string, espera: 
       const archivos = [];
       for (const meta of seleccion) archivos.push(await descargar(meta));
       const r = await explorarConvocatoria(convocatoriaId, archivos);
-      await editar(resumenDe(r, todos.length - seleccion.length));
+      await editar(resumenDe(r, todos.length - seleccion.length), botonBorradores(convocatoriaId));
     } catch (err) {
       console.error("[bot] error leyendo documentos:", err);
       await editar(`⚠ No pude leer los documentos.\n<i>${mensajeErrorIa(err).replace(/[<>&]/g, "")}</i>`).catch(() => {});

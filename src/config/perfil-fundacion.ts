@@ -31,3 +31,23 @@ export const PERFIL_FUNDACION = {
    */
   entidadesDelTerritorio: [/manizales/i, /gobernaci[oó]n de caldas/i, /departamento de caldas/i],
 } as const;
+
+/**
+ * Datos institucionales para los borradores (carta de presentación, propuesta).
+ * Lo que quede vacío sale en el borrador como [campo entre corchetes] para que
+ * la directora lo complete a mano; nunca lo inventa la IA. Llenarlos una vez
+ * hace que aparezcan en todos los borradores.
+ */
+export const DATOS_FUNDACION = {
+  nombreLegal: "Fundación Asisco Up",
+  nit: "",
+  representanteLegal: "",
+  cargoRepresentante: "Directora",
+  direccion: "",
+  ciudad: "Manizales",
+  telefono: "",
+  correo: "",
+  anioConstitucion: "",
+  /** Logros, cifras o programas que la fundación quiera que se mencionen (frases cortas, reales). */
+  trayectoria: [] as string[],
+};

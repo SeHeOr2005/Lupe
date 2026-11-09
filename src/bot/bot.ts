@@ -11,6 +11,7 @@ import { HttpError } from "../http/errors.js";
 import { registrarRecepcionDeDocumentos } from "./documentos.js";
 import { registrarCarpeta } from "./carpeta.js";
 import { botonesDecision } from "./teclados.js";
+import { botonBorradores, registrarBorradores } from "./borradores.js";
 import { archivosPrevios } from "../explorador/aplicar.js";
 import { crearAvisos } from "./avisos.js";
 import { EsperaDeDocumentos } from "./espera.js";
@@ -145,7 +146,13 @@ export function crearBot(token: string): { bot: Bot; avisos: ReturnType<typeof c
     }
     await ctx.reply(`${tarjetaConvocatoria(c)}\n\nEstado: <b>${c.estado}</b>`, {
       parse_mode: "HTML",
-      reply_markup: c.estado === "pendiente_aprobacion" ? botonesDecision(c.id) : undefined,
+      // Pendiente: decidir. Ya aprobada o en postulación: pedir borradores.
+      reply_markup:
+        c.estado === "pendiente_aprobacion"
+          ? botonesDecision(c.id)
+          : ["aprobada", "en_postulacion"].includes(c.estado)
+            ? botonBorradores(c.id)
+            : undefined,
       link_preview_options: { is_disabled: true },
     });
   });
@@ -162,6 +169,9 @@ export function crearBot(token: string): { bot: Bot; avisos: ReturnType<typeof c
   // (/nueva). Antes del manejador general: su botón "nv:si" es suyo. Después de la
   // carpeta: si la carpeta espera un archivo o /cancelar, ella va primero.
   registrarRecepcionDeDocumentos(bot, token, espera);
+
+  // Borradores con IA (/borrador, botón "📝 Borradores"): sus botones "bd:..." son suyos.
+  registrarBorradores(bot, espera);
 
   bot.on("callback_query:data", async (ctx) => {
     const leida = leerAccion(ctx.callbackQuery.data);
@@ -193,6 +203,7 @@ export async function registrarComandos(bot: Bot) {
     { command: "pendientes", description: "Convocatorias que esperan aprobación" },
     { command: "convocatoria", description: "Ver una convocatoria por id" },
     { command: "nueva", description: "Agregar una convocatoria (PDF, captura o enlace)" },
+    { command: "borrador", description: "Carta o propuesta en Word (responde a una convocatoria)" },
     { command: "documentos", description: "Carpeta de la fundación: ver, subir, actualizar" },
     { command: "avisos", description: "Activar o desactivar el resumen diario" },
     { command: "resumen", description: "Convocatorias nuevas de las últimas 24 horas" },
