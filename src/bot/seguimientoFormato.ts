@@ -187,4 +187,5 @@ export const textoRadicada = (titulo: string, fecha: Date, numero?: string) =>
     numero ? `🔖 Radicado No. ${escaparHtml(numero)}` : "🔖 Sin número de radicado",
     "",
     "La convocatoria quedó como <b>postulada</b> y su resultado como pendiente. Ya no aparece en /aprobadas.",
+    "Cuando te avisen si la ganaron, regístralo con /resultado.",
   ].join("\n");

@@ -13,6 +13,7 @@ import { registrarCarpeta } from "./carpeta.js";
 import { botonesDecision } from "./teclados.js";
 import { registrarBorradores } from "./borradores.js";
 import { botonesSeguimiento, registrarSeguimiento } from "./seguimiento.js";
+import { registrarResultados } from "./resultados.js";
 import { archivosPrevios } from "../explorador/aplicar.js";
 import { crearAvisos } from "./avisos.js";
 import { EsperaDeDocumentos } from "./espera.js";
@@ -189,6 +190,9 @@ export function crearBot(token: string): { bot: Bot; avisos: ReturnType<typeof c
   // Seguimiento (/aprobadas): checklist de pasos y documentos. Sus botones "sg:..." son suyos.
   registrarSeguimiento(bot);
 
+  // Resultado de las postulaciones (/resultado): sus botones "rs:..." son suyos.
+  registrarResultados(bot);
+
   // /cancelar: cada módulo de arriba limpió su paso a medias y pasó el turno; aquí se responde una vez.
   bot.command("cancelar", (ctx) => ctx.reply("Listo, cancelado."));
 
@@ -230,6 +234,7 @@ export async function registrarComandos(bot: Bot) {
     { command: "convocatoria", description: "Ver una convocatoria por id" },
     { command: "nueva", description: "Agregar una convocatoria (PDF, captura o enlace)" },
     { command: "aprobadas", description: "Convocatorias aprobadas y su checklist" },
+    { command: "resultado", description: "Registrar si una postulación se ganó o no" },
     { command: "borrador", description: "Carta o propuesta en Word (responde a una convocatoria)" },
     { command: "documentos", description: "Carpeta de la fundación: ver, subir, actualizar" },
     { command: "avisos", description: "Activar o desactivar el resumen diario" },
