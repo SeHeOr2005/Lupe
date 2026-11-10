@@ -11,7 +11,8 @@ import { HttpError } from "../http/errors.js";
 import { registrarRecepcionDeDocumentos } from "./documentos.js";
 import { registrarCarpeta } from "./carpeta.js";
 import { botonesDecision } from "./teclados.js";
-import { botonBorradores, registrarBorradores } from "./borradores.js";
+import { registrarBorradores } from "./borradores.js";
+import { botonesSeguimiento, registrarSeguimiento } from "./seguimiento.js";
 import { archivosPrevios } from "../explorador/aplicar.js";
 import { crearAvisos } from "./avisos.js";
 import { EsperaDeDocumentos } from "./espera.js";
@@ -87,7 +88,9 @@ async function decidir(ctx: Context, accion: "aprobar" | "descartar", id: string
       espera.marcar(ctx.chat.id, c.id);
       if ((await archivosPrevios(c.id)).length > 0) {
         // Ya se leyeron sus documentos (por ejemplo, si se agregó desde el bot con su PDF).
-        await ctx.reply("📄 Ya tengo sus documentos y su paso a paso. Si te llega un anexo o una adenda, respóndeme con él aquí.");
+        await ctx.reply("📄 Ya tengo sus documentos y su paso a paso. Si te llega un anexo o una adenda, respóndeme con él aquí.", {
+          reply_markup: botonesSeguimiento(c.id),
+        });
         return;
       }
       // force_reply abre la respuesta a este mensaje: basta con adjuntar el PDF.
@@ -151,7 +154,7 @@ export function crearBot(token: string): { bot: Bot; avisos: ReturnType<typeof c
         c.estado === "pendiente_aprobacion"
           ? botonesDecision(c.id)
           : ["aprobada", "en_postulacion"].includes(c.estado)
-            ? botonBorradores(c.id)
+            ? botonesSeguimiento(c.id)
             : undefined,
       link_preview_options: { is_disabled: true },
     });
@@ -172,6 +175,9 @@ export function crearBot(token: string): { bot: Bot; avisos: ReturnType<typeof c
 
   // Borradores con IA (/borrador, botón "📝 Borradores"): sus botones "bd:..." son suyos.
   registrarBorradores(bot, espera);
+
+  // Seguimiento (/aprobadas): checklist de pasos y documentos. Sus botones "sg:..." son suyos.
+  registrarSeguimiento(bot);
 
   bot.on("callback_query:data", async (ctx) => {
     const leida = leerAccion(ctx.callbackQuery.data);
@@ -203,6 +209,7 @@ export async function registrarComandos(bot: Bot) {
     { command: "pendientes", description: "Convocatorias que esperan aprobación" },
     { command: "convocatoria", description: "Ver una convocatoria por id" },
     { command: "nueva", description: "Agregar una convocatoria (PDF, captura o enlace)" },
+    { command: "aprobadas", description: "Convocatorias aprobadas y su checklist" },
     { command: "borrador", description: "Carta o propuesta en Word (responde a una convocatoria)" },
     { command: "documentos", description: "Carpeta de la fundación: ver, subir, actualizar" },
     { command: "avisos", description: "Activar o desactivar el resumen diario" },

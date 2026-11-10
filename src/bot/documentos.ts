@@ -33,6 +33,7 @@ import { mensajeErrorIa } from "../ai/reintentos.js";
 import { EstadoPorChat, type EsperaDeDocumentos } from "./espera.js";
 import { botonesDecision } from "./teclados.js";
 import { botonBorradores } from "./borradores.js";
+import { botonesSeguimiento } from "./seguimiento.js";
 
 /** Límite de Telegram para que un bot descargue un archivo. */
 const MAX_BYTES_ARCHIVO = 20 * 1024 * 1024;
@@ -190,7 +191,7 @@ export function registrarRecepcionDeDocumentos(bot: Bot, token: string, espera: 
       const archivos = [];
       for (const meta of seleccion) archivos.push(await descargar(meta));
       const r = await explorarConvocatoria(convocatoriaId, archivos);
-      await editar(resumenDe(r, todos.length - seleccion.length), botonBorradores(convocatoriaId));
+      await editar(resumenDe(r, todos.length - seleccion.length), botonesSeguimiento(convocatoriaId));
     } catch (err) {
       console.error("[bot] error leyendo documentos:", err);
       await editar(`⚠ No pude leer los documentos.\n<i>${mensajeErrorIa(err).replace(/[<>&]/g, "")}</i>`).catch(() => {});

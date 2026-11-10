@@ -130,6 +130,7 @@ export const TEXTO_AYUDA = [
   "/pendientes — convocatorias que esperan tu aprobación",
   "/convocatoria &lt;id&gt; — ver una convocatoria puntual",
   "/nueva — agregar una convocatoria que te llegó por otro lado (PDF, captura o enlace)",
+  "/aprobadas — convocatorias aprobadas, con el checklist de pasos y documentos",
   "/borrador — carta de presentación o propuesta técnica en Word (responde a la tarjeta de una convocatoria)",
   "/documentos — carpeta de la fundación: ver, subir, actualizar o eliminar documentos",
   "/avisos — activar o desactivar el resumen diario de convocatorias nuevas",
