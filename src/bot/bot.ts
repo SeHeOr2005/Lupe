@@ -20,7 +20,9 @@ import {
   ACCION,
   TAMANO_PAGINA,
   TEXTO_AYUDA,
+  TEXTO_USO_CONVOCATORIA,
   estaAutorizado,
+  idDeConvocatoriaEn,
   leerAccion,
   tarjetaConvocatoria,
   textoNoAutorizado,
@@ -28,7 +30,25 @@ import {
   textoPedirDocumentos,
 } from "./formato.js";
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** La tarjeta de una convocatoria con los botones que tocan según su estado. */
+async function mostrarConvocatoria(ctx: Context, id: string) {
+  const c = await prisma.convocatoria.findUnique({ where: { id } });
+  if (!c) {
+    await ctx.reply("No encontré una convocatoria con ese id. Cópialo de la última línea de su tarjeta (tócalo y se copia).");
+    return;
+  }
+  await ctx.reply(`${tarjetaConvocatoria(c)}\n\nEstado: <b>${c.estado}</b>`, {
+    parse_mode: "HTML",
+    // Pendiente: decidir. Ya aprobada o en postulación: checklist y borradores.
+    reply_markup:
+      c.estado === "pendiente_aprobacion"
+        ? botonesDecision(c.id)
+        : ["aprobada", "en_postulacion"].includes(c.estado)
+          ? botonesSeguimiento(c.id)
+          : undefined,
+    link_preview_options: { is_disabled: true },
+  });
+}
 
 const ETIQUETA_ESTADO: Record<string, string> = {
   aprobada: "✅ <b>Aprobada</b>",
@@ -136,28 +156,18 @@ export function crearBot(token: string): { bot: Bot; avisos: ReturnType<typeof c
 
   bot.command("pendientes", (ctx) => enviarPendientes(ctx, 0));
 
+  // El id se acepta como venga: "/convocatoria <id>", "/convocatoria id" o el id solo en
+  // otro mensaje (más abajo). Así funciona copiándolo de la tarjeta y pegándolo.
   bot.command("convocatoria", async (ctx) => {
-    const id = ctx.match.trim();
-    if (!UUID.test(id)) {
-      await ctx.reply("Uso: /convocatoria <id>. El id aparece al final de cada convocatoria.");
+    const id = idDeConvocatoriaEn(ctx.match);
+    if (!id) {
+      await ctx.reply(TEXTO_USO_CONVOCATORIA, {
+        parse_mode: "HTML",
+        reply_markup: { force_reply: true, input_field_placeholder: "Pega aquí el id de la convocatoria" },
+      });
       return;
     }
-    const c = await prisma.convocatoria.findUnique({ where: { id } });
-    if (!c) {
-      await ctx.reply("No encontré una convocatoria con ese id.");
-      return;
-    }
-    await ctx.reply(`${tarjetaConvocatoria(c)}\n\nEstado: <b>${c.estado}</b>`, {
-      parse_mode: "HTML",
-      // Pendiente: decidir. Ya aprobada o en postulación: pedir borradores.
-      reply_markup:
-        c.estado === "pendiente_aprobacion"
-          ? botonesDecision(c.id)
-          : ["aprobada", "en_postulacion"].includes(c.estado)
-            ? botonesSeguimiento(c.id)
-            : undefined,
-      link_preview_options: { is_disabled: true },
-    });
+    await mostrarConvocatoria(ctx, id);
   });
 
   // Carpeta de la fundación (/documentos). Va antes del manejador general de botones
@@ -192,6 +202,13 @@ export function crearBot(token: string): { bot: Bot; avisos: ReturnType<typeof c
       return;
     }
     await decidir(ctx, leida.accion, leida.valor, espera);
+  });
+
+  // Un id de convocatoria suelto (copiado de una tarjeta, con o sin < >): se muestra esa convocatoria.
+  bot.on("message:text", async (ctx, next) => {
+    const id = ctx.message.text.startsWith("/") ? undefined : idDeConvocatoriaEn(ctx.message.text);
+    if (!id) return next();
+    await mostrarConvocatoria(ctx, id);
   });
 
   bot.on("message", (ctx) => ctx.reply("No entendí. Escribe /ayuda para ver lo que puedo hacer."));

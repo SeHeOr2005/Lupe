@@ -94,3 +94,21 @@ describe("lista blanca", () => {
     expect(estaAutorizado(undefined, [])).toBe(false);
   });
 });
+
+describe("id de una convocatoria escrito de cualquier forma", () => {
+  const id = "02c9b39d-ce40-4f01-b7a3-0aa17e7879e2";
+  it("lo encuentra solo, entre < >, con espacios o en mayúsculas", async () => {
+    const { idDeConvocatoriaEn } = await import("../src/bot/formato.js");
+    expect(idDeConvocatoriaEn(id)).toBe(id);
+    expect(idDeConvocatoriaEn(`<${id}>`)).toBe(id);
+    expect(idDeConvocatoriaEn(`  ${id}  `)).toBe(id);
+    expect(idDeConvocatoriaEn(id.toUpperCase())).toBe(id);
+    expect(idDeConvocatoriaEn("<id>")).toBeUndefined();
+  });
+
+  it("el mensaje de uso da un ejemplo real en lugar de <id>", async () => {
+    const { TEXTO_USO_CONVOCATORIA } = await import("../src/bot/formato.js");
+    expect(TEXTO_USO_CONVOCATORIA).toContain(id);
+    expect(TEXTO_USO_CONVOCATORIA).not.toContain("&lt;id&gt;");
+  });
+});

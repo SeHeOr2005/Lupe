@@ -128,7 +128,7 @@ export const TEXTO_AYUDA = [
   "<b>Lupe</b> busca convocatorias para la fundación y te las trae para que decidas.",
   "",
   "/pendientes — convocatorias que esperan tu aprobación",
-  "/convocatoria &lt;id&gt; — ver una convocatoria puntual",
+  "/convocatoria — ver una convocatoria puntual (o pégame su id, el código al final de cada tarjeta)",
   "/nueva — agregar una convocatoria que te llegó por otro lado (PDF, captura o enlace)",
   "/aprobadas — convocatorias aprobadas, con el checklist de pasos y documentos",
   "/borrador — carta de presentación o propuesta técnica en Word (responde a la tarjeta de una convocatoria)",
@@ -174,6 +174,16 @@ export function textoPedirDocumentos(c: { id: string; urlOrigen: string; analisi
     `<code>${c.id}</code>`,
   ].join("\n");
 }
+
+/** /convocatoria sin id: cómo encontrarlo y dos formas de mandarlo, con un ejemplo real. */
+export const TEXTO_USO_CONVOCATORIA = [
+  "🔎 <b>¿Qué convocatoria quieres ver?</b>",
+  "",
+  "Pégame su id: es el código de la última línea de cada tarjeta (tócalo y se copia), por ejemplo:",
+  "<code>02c9b39d-ce40-4f01-b7a3-0aa17e7879e2</code>",
+  "",
+  "Puedes mandarlo solo, o junto al comando: <code>/convocatoria 02c9b39d-…</code>",
+].join("\n");
 
 export const TEXTO_SIN_CONVOCATORIA = [
   "¿De qué convocatoria es esto?",

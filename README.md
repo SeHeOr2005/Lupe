@@ -48,7 +48,7 @@ Abrir [@lupe_asisco_bot](https://t.me/lupe_asisco_bot) y escribir `/start`.
 | Comando | Qué hace |
 |---|---|
 | `/pendientes` | Convocatorias esperando decisión, con botones ✅ Aprobar / ❌ Descartar |
-| `/convocatoria <id>` | Muestra una convocatoria puntual |
+| `/convocatoria <id>` | Muestra una convocatoria puntual. El id es el código de la última línea de cada tarjeta; se acepta junto al comando, entre `< >` o pegado solo en un mensaje |
 | `/nueva` | Agregar una convocatoria que llegó por otro lado: enviar su PDF, una captura o el enlace |
 | `/aprobadas` | Convocatorias aprobadas o en postulación con su avance (🟢 lista · 🟡 en marcha · ⚪ sin empezar · 🔴 cierra en ≤ 3 días). Cada una abre su checklist: tocar un paso o un documento lo marca o desmarca. También con el botón **📋 Checklist** |
 | `/borrador` | Respondiendo a la tarjeta de una convocatoria: carta de presentación o propuesta técnica en Word (también con el botón **📝 Borradores**). Los datos institucionales (NIT, representante legal, dirección…) se llenan una vez en `src/config/perfil-fundacion.ts` → `DATOS_FUNDACION` |
