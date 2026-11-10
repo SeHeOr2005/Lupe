@@ -225,12 +225,28 @@ export interface ResumenExploracion {
   requisitosHabilitantes: string[];
   advertencias: string[];
   archivosLeidos: number;
+  aplicabilidad?: { veredicto: "aplica" | "revisar" | "no_aplica"; razon: string; coincidencias: string[]; alertas: string[] };
 }
 
 const formatoCierre = new Intl.DateTimeFormat("es-CO", { dateStyle: "full", timeStyle: "short", timeZone: "America/Bogota" });
 
 export function textoResumenExploracion(r: ResumenExploracion): string {
   const lineas = [`📖 Leí ${r.archivosLeidos === 1 ? "el archivo" : `los ${r.archivosLeidos} archivos`} de:`, `<b>${escaparHtml(r.titulo)}</b>`, ""];
+
+  if (r.aplicabilidad) {
+    const a = r.aplicabilidad;
+    const titulo =
+      a.veredicto === "aplica"
+        ? "✅ <b>Encaja con la fundación</b>"
+        : a.veredicto === "revisar"
+          ? "🟡 <b>Encaja en parte: revísala antes de postularte</b>"
+          : "⛔ <b>No parece aplicar a la fundación</b>";
+    lineas.push(titulo, `<i>${escaparHtml(recortar(a.razon, 400))}</i>`);
+    for (const c of a.coincidencias.slice(0, 4)) lineas.push(`  ✔ ${escaparHtml(recortar(c, 160))}`);
+    for (const x of a.alertas.slice(0, 4)) lineas.push(`  ⚠ ${escaparHtml(recortar(x, 160))}`);
+    if (a.veredicto === "no_aplica") lineas.push("Te sugiero descartarla, salvo que veas algo que yo no.");
+    lineas.push("");
+  }
 
   if (r.fechaCierre) {
     const cuando = escaparHtml(formatoCierre.format(r.fechaCierre.fecha));

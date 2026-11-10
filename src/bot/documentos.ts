@@ -100,6 +100,7 @@ function resumenDe(r: ResultadoExploracion, omitidos = 0): string {
       ...(omitidos > 0 ? [`No alcancé a leer ${omitidos} archivo(s) viejo(s) por tamaño.`] : []),
     ],
     archivosLeidos: r.archivosLeidos,
+    ...(r.aplicabilidad ? { aplicabilidad: r.aplicabilidad } : {}),
   });
 }
 

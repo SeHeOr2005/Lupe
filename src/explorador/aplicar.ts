@@ -10,8 +10,9 @@
  */
 import { prisma } from "../db/prisma.js";
 import { NotFoundError } from "../http/errors.js";
-import { leerDocumentos, type ArchivoParaLeer, type ExtraccionDocumentos } from "../ai/explorador.js";
+import { leerDocumentos, validarAplicabilidad, type Aplicabilidad, type ArchivoParaLeer, type ExtraccionDocumentos } from "../ai/explorador.js";
 import { quedaCupoIa } from "../ai/presupuesto.js";
+import { PERFIL_FUNDACION } from "../config/perfil-fundacion.js";
 import { normalizarParaCita, textoNormalizadoDePdf } from "./citas.js";
 import { armarPlan, type PlanDeGuardado, type TipoDocumento } from "./plan.js";
 
@@ -43,6 +44,8 @@ export interface ResultadoExploracion {
   documentos: { tipo: TipoDocumento; descripcion: string; listo: boolean }[];
   archivosLeidos: number;
   tokensUsados: number;
+  /** Segunda revisión: ¿encaja con la fundación? Ausente si la IA no pudo hacerla. */
+  aplicabilidad?: Aplicabilidad;
 }
 
 const comoObjeto = (v: unknown): Record<string, unknown> =>
@@ -98,6 +101,24 @@ export async function explorarConvocatoria(
     const { extraccion, tokensUsados: t } =
       lecturaPrevia ?? (await leerDocumentos(archivos, { titulo: convocatoria.titulo, entidad: convocatoria.entidad }));
     tokensUsados = t;
+
+    // Segunda pasada: se vuelven a leer los documentos contra el perfil de la fundación.
+    // Si falla (cupo, JSON raro) no se pierde la exploración: solo queda sin veredicto.
+    let aplicabilidad: Aplicabilidad | undefined;
+    const cupoRestante = await quedaCupoIa();
+    if (cupoRestante.queda) {
+      try {
+        const v = await validarAplicabilidad(
+          archivos,
+          { titulo: convocatoria.titulo, entidad: convocatoria.entidad },
+          PERFIL_FUNDACION,
+        );
+        aplicabilidad = v.aplicabilidad;
+        tokensUsados += v.tokensUsados;
+      } catch (err) {
+        console.warn("[explorador] no pude validar la aplicabilidad:", err instanceof Error ? err.message : err);
+      }
+    }
 
     const textoPdf = await textoVerificable(archivos);
     const plan = armarPlan(extraccion, { textoPdf, hayCapturas: archivos.some((a) => a.mimeType.startsWith("image/")) });
@@ -165,6 +186,7 @@ export async function explorarConvocatoria(
                   }
                 : {}),
               ...(extraccion.resumen ? { resumen: extraccion.resumen } : {}),
+              ...(aplicabilidad ? { aplicabilidad: { ...aplicabilidad, fecha: new Date().toISOString() } } : {}),
               advertencias: plan.advertencias,
               tokensUsados,
             },
@@ -175,7 +197,7 @@ export async function explorarConvocatoria(
     });
 
     await registrarLectura(convocatoria.fuenteId, inicioAt, archivos.length, tokensUsados);
-    return { titulo: convocatoria.titulo, plan, documentos, archivosLeidos: archivos.length, tokensUsados };
+    return { titulo: convocatoria.titulo, plan, documentos, archivosLeidos: archivos.length, tokensUsados, ...(aplicabilidad ? { aplicabilidad } : {}) };
   } catch (err) {
     await registrarLectura(convocatoria.fuenteId, inicioAt, archivos.length, tokensUsados, err);
     throw err;

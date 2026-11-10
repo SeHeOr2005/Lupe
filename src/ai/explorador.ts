@@ -140,6 +140,102 @@ function getClient(): GoogleGenAI {
   return client;
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Segunda revisión: ¿la convocatoria aplica a lo que es la fundación?
+// ──────────────────────────────────────────────────────────────────────────
+
+const aplicabilidadSchema = z.object({
+  veredicto: z.enum(["aplica", "revisar", "no_aplica"]),
+  razon: z.string(),
+  coincidencias: z.array(z.string()).default([]),
+  alertas: z.array(z.string()).default([]),
+});
+
+export type Aplicabilidad = z.infer<typeof aplicabilidadSchema>;
+
+const APLICABILIDAD_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    veredicto: {
+      type: "string",
+      enum: ["aplica", "revisar", "no_aplica"],
+      description: "aplica: encaja con la fundación; revisar: encaja en parte o hay dudas; no_aplica: no tiene relación o no puede cumplirla",
+    },
+    razon: { type: "string", description: "2 o 3 frases en español que justifican el veredicto" },
+    coincidencias: { type: "array", items: { type: "string" }, description: "puntos concretos en que la convocatoria coincide con la fundación" },
+    alertas: {
+      type: "array",
+      items: { type: "string" },
+      description: "requisitos o condiciones que la fundación podría no cumplir (experiencia, tipo de entidad, territorio, población, monto...)",
+    },
+  },
+  required: ["veredicto", "razon", "coincidencias", "alertas"],
+};
+
+const PROMPT_APLICABILIDAD = `Eres el revisor final de Lupe. Antes de que la fundación gaste tiempo
+postulándose, debes validar si esta convocatoria realmente le conviene.
+
+Perfil de la fundación:
+{{perfil}}
+
+Temas afines: {{temas}}.
+Municipio: {{municipio}}.
+
+Convocatoria: {{titulo}}
+Entidad: {{entidad}}
+
+Lee de nuevo los archivos completos (no te limites a un resumen) y compara con el perfil:
+- ¿El objeto, la población beneficiaria y los temas tienen relación con lo que hace la fundación?
+- ¿Se ejecuta en {{municipio}} o en un territorio que lo incluya?
+- ¿Los requisitos habilitantes (tipo de entidad, años de experiencia, experiencia específica,
+  montos, certificaciones) los podría cumplir una fundación pequeña sin ánimo de lucro?
+
+Veredicto:
+- "aplica": hay relación clara con la fundación y no ves requisitos que la bloqueen.
+- "revisar": hay relación parcial o dudas que la directora debe confirmar.
+- "no_aplica": el tema, la población o el territorio no tienen relación, o hay un requisito
+  que la fundación evidentemente no cumple.
+
+No inventes: basa todo en lo que dicen los archivos. Ante duda razonable entre "aplica" y
+"no_aplica", usa "revisar".`;
+
+export async function validarAplicabilidad(
+  archivos: ArchivoParaLeer[],
+  convocatoria: { titulo: string; entidad: string },
+  perfil: { descripcion: string; temasAfines: readonly string[]; municipio: string },
+): Promise<{ aplicabilidad: Aplicabilidad; tokensUsados: number }> {
+  const prompt = PROMPT_APLICABILIDAD.replace("{{perfil}}", perfil.descripcion)
+    .replace("{{temas}}", perfil.temasAfines.join("; "))
+    .replaceAll("{{municipio}}", perfil.municipio)
+    .replace("{{titulo}}", convocatoria.titulo)
+    .replace("{{entidad}}", convocatoria.entidad);
+
+  const response = await conModeloDeRespaldo([env.MODELO_EVALUADOR, env.MODELO_EXPLORADOR], (model) =>
+    getClient().models.generateContent({
+      model,
+      contents: [
+        {
+          role: "user",
+          parts: [
+            ...archivos.flatMap((a) => [
+              { text: `--- Archivo: ${a.nombre} ---` },
+              { inlineData: { mimeType: a.mimeType, data: a.datos.toString("base64") } },
+            ]),
+            { text: prompt },
+          ],
+        },
+      ],
+      config: { responseMimeType: "application/json", responseJsonSchema: APLICABILIDAD_JSON_SCHEMA, temperature: 0 },
+    }),
+  );
+
+  const parsed = aplicabilidadSchema.safeParse(JSON.parse(response.text ?? "{}"));
+  if (!parsed.success) {
+    throw new Error(`Gemini devolvió un JSON de aplicabilidad que no cumple el esquema: ${parsed.error.message}`);
+  }
+  return { aplicabilidad: parsed.data, tokensUsados: response.usageMetadata?.totalTokenCount ?? 0 };
+}
+
 /**
  * Lee los archivos de una convocatoria. Sin `contexto` (una convocatoria que la
  * directora agrega desde el bot), el modelo también identifica su título y entidad.
