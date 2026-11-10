@@ -102,3 +102,27 @@ describe("checklist", () => {
     expect(etiquetaPaso({ ...pasos[1]!, titulo: "Una etapa con un nombre larguísimo que no cabe en un botón" }, 1).length).toBeLessThanOrEqual(48);
   });
 });
+
+describe("radicación", () => {
+  it("hoy en Colombia, aunque en UTC ya sea mañana", async () => {
+    const { hoyEnColombia } = await import("../src/bot/seguimientoFormato.js");
+    // 10 de noviembre a las 9 p. m. en Colombia = 11 de noviembre 02:00 UTC
+    expect(hoyEnColombia(new Date("2026-11-11T02:00:00Z")).toISOString()).toBe("2026-11-10T00:00:00.000Z");
+  });
+
+  it("no acepta fechas de radicación futuras", async () => {
+    const { fechaRadicacionValida } = await import("../src/bot/seguimientoFormato.js");
+    const ahora = new Date("2026-11-10T15:00:00Z");
+    expect(fechaRadicacionValida(new Date("2026-11-10T00:00:00Z"), ahora)).toBe(true);
+    expect(fechaRadicacionValida(new Date("2026-11-03T00:00:00Z"), ahora)).toBe(true);
+    expect(fechaRadicacionValida(new Date("2026-11-11T00:00:00Z"), ahora)).toBe(false);
+  });
+
+  it("confirma con la fecha y el número, o sin número", async () => {
+    const { textoRadicada } = await import("../src/bot/seguimientoFormato.js");
+    const fecha = new Date("2026-11-25T00:00:00Z");
+    expect(textoRadicada("Fondo Semillas", fecha, "R-2026-0457")).toContain("Radicado No. R-2026-0457");
+    expect(textoRadicada("Fondo Semillas", fecha)).toContain("Sin número de radicado");
+    expect(textoRadicada("Fondo Semillas", fecha)).toContain("25 de noviembre de 2026");
+  });
+});

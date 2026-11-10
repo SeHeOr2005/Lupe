@@ -8,7 +8,7 @@
  */
 import { prisma } from "../db/prisma.js";
 import { NotFoundError } from "../http/errors.js";
-import { completarPaso } from "./convocatorias.js";
+import { completarPaso, radicarPostulacion, transicionarConvocatoria } from "./convocatorias.js";
 
 /** Estados en los que una convocatoria se está preparando (aparecen en /aprobadas). */
 export const EN_SEGUIMIENTO = ["aprobada", "en_postulacion"] as const;
@@ -77,4 +77,31 @@ export async function alternarDocumento(documentoExigidoId: string): Promise<str
     data: { estado, ...(estado === "pendiente" ? { documentoId: null } : {}) },
   });
   return d.convocatoriaId;
+}
+
+/**
+ * "🎒 Ya radicamos": registra la postulación (fecha y número de radicado), abre su
+ * resultado como pendiente y pasa la convocatoria a "postulada" (ver
+ * services/convocatorias.ts#radicarPostulacion). Si seguía en "aprobada" porque
+ * no se marcó ningún paso, primero pasa a "en_postulacion": radicar es la prueba.
+ */
+export async function radicarDesdeBot(
+  convocatoriaId: string,
+  datos: { fechaRadicacion: Date; numeroRadicado?: string; autor: string },
+) {
+  const c = await prisma.convocatoria.findUnique({ where: { id: convocatoriaId }, select: { estado: true, titulo: true } });
+  if (!c) throw new NotFoundError("convocatoria", convocatoriaId);
+  if (c.estado === "aprobada") {
+    await transicionarConvocatoria(convocatoriaId, "en_postulacion", {
+      origen: "usuaria",
+      nota: `Pasa a postulación al radicar desde Telegram (${datos.autor}).`,
+    });
+  }
+  const { postulacion } = await radicarPostulacion({
+    convocatoriaId,
+    fechaRadicacion: datos.fechaRadicacion,
+    ...(datos.numeroRadicado ? { numeroRadicado: datos.numeroRadicado } : {}),
+    notas: `Radicada desde Telegram por ${datos.autor}.`,
+  });
+  return { titulo: c.titulo, postulacion };
 }

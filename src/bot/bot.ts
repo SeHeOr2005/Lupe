@@ -189,6 +189,9 @@ export function crearBot(token: string): { bot: Bot; avisos: ReturnType<typeof c
   // Seguimiento (/aprobadas): checklist de pasos y documentos. Sus botones "sg:..." son suyos.
   registrarSeguimiento(bot);
 
+  // /cancelar: cada módulo de arriba limpió su paso a medias y pasó el turno; aquí se responde una vez.
+  bot.command("cancelar", (ctx) => ctx.reply("Listo, cancelado."));
+
   bot.on("callback_query:data", async (ctx) => {
     const leida = leerAccion(ctx.callbackQuery.data);
     if (!leida) {

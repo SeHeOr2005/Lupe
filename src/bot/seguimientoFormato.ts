@@ -142,3 +142,49 @@ export function textoChecklist(
   lineas.push("", "<i>Toca un paso o un documento para marcarlo o desmarcarlo.</i>", `<code>${c.id}</code>`);
   return lineas.join("\n");
 }
+
+// ─────────────── Radicación ("🎒 Ya radicamos") ───────────────
+
+/** Hoy en Colombia, como fecha sin hora (medianoche UTC, igual que guarda la columna DATE). */
+export function hoyEnColombia(ahora = new Date()): Date {
+  const [a, m, d] = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" })
+    .format(ahora)
+    .split("-")
+    .map(Number) as [number, number, number];
+  return new Date(Date.UTC(a, m - 1, d));
+}
+
+/** Una fecha de radicación no puede ser futura (más allá de hoy en Colombia). */
+export function fechaRadicacionValida(fecha: Date, ahora = new Date()): boolean {
+  return fecha.getTime() <= hoyEnColombia(ahora).getTime();
+}
+
+const formatoDia = new Intl.DateTimeFormat("es-CO", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+export const mostrarDiaRadicacion = (fecha: Date) => formatoDia.format(fecha);
+
+export const textoPedirFechaRadicacion = (titulo: string) =>
+  [
+    `🎒 <b>Registrar la radicación</b>`,
+    escaparHtml(recortar(titulo, 120)),
+    "",
+    "¿Qué día se radicó la propuesta? Toca <b>Hoy</b> o escribe la fecha (por ejemplo 25/11/2026).",
+    "<i>Escribe /cancelar si te arrepientes.</i>",
+  ].join("\n");
+
+export const textoPedirNumeroRadicado = (fecha: Date) =>
+  [
+    `📅 Radicada el <b>${mostrarDiaRadicacion(fecha)}</b>.`,
+    "",
+    "¿Te dieron un número de radicado? Escríbelo, o toca <b>No tengo número</b>.",
+  ].join("\n");
+
+export const textoRadicada = (titulo: string, fecha: Date, numero?: string) =>
+  [
+    "✅ <b>Postulación registrada.</b>",
+    escaparHtml(recortar(titulo, 120)),
+    "",
+    `📅 Radicada el ${mostrarDiaRadicacion(fecha)}`,
+    numero ? `🔖 Radicado No. ${escaparHtml(numero)}` : "🔖 Sin número de radicado",
+    "",
+    "La convocatoria quedó como <b>postulada</b> y su resultado como pendiente. Ya no aparece en /aprobadas.",
+  ].join("\n");

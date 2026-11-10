@@ -103,7 +103,7 @@ export function registrarCarpeta(bot: Bot) {
 
   bot.command(["documentos", "carpeta"], (ctx) => mostrarMenu(ctx));
 
-  // Limpia el paso de la carpeta y deja que los demás módulos limpien el suyo (documentos.ts responde).
+  // Limpia el paso de la carpeta y deja que los demás módulos limpien el suyo (bot.ts responde).
   bot.command("cancelar", async (ctx, next) => {
     pasos.quitar(ctx.chat.id);
     await next();

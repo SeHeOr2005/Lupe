@@ -277,11 +277,11 @@ export function registrarRecepcionDeDocumentos(bot: Bot, token: string, espera: 
     });
   });
 
-  // /cancelar también lo atiende la carpeta (que pasa el turno aquí sin responder).
-  bot.command("cancelar", async (ctx) => {
+  // /cancelar lo atienden en cadena la carpeta, este módulo y el seguimiento: cada uno limpia su paso.
+  bot.command("cancelar", async (ctx, next) => {
     modoNueva.quitar(ctx.chat.id);
     huerfanos.quitar(ctx.chat.id);
-    await ctx.reply("Listo, cancelado.");
+    await next(); // la respuesta la da bot.ts cuando todos limpiaron lo suyo
   });
 
   bot.callbackQuery(BOTON_NUEVA, async (ctx) => {
