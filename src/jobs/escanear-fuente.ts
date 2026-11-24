@@ -13,7 +13,7 @@ import { mapearRespuestaSecop } from "../scraping/secop.js";
 import { evaluarPaginaUnica } from "../ai/gemini.js";
 import { tokensUsadosHoy } from "../ai/presupuesto.js";
 import { transicionarConvocatoria } from "../services/convocatorias.js";
-import { calcularHuella, type Hallazgo } from "./hallazgo.js";
+import { calcularHuella, filtrarNuevos, type Hallazgo } from "./hallazgo.js";
 import { elegibilidadComoJson, evaluarLote, type Elegibilidad } from "../elegibilidad/evaluar.js";
 
 /** Lo que devuelve cada modo de escaneo cuando hubo contenido nuevo. */
@@ -135,18 +135,23 @@ async function escanearComoApi(url: string): Promise<Extraccion> {
 }
 
 /**
- * Deduplicación: deja solo los hallazgos cuya huella no está en la base (ni
- * repetida dentro del mismo escaneo). Va antes de la elegibilidad para no gastar
- * IA en convocatorias que ya teníamos.
+ * Deduplicación: deja solo los hallazgos que no están en la base (ni repetidos
+ * dentro del mismo escaneo). Va antes de la elegibilidad para no gastar IA en
+ * convocatorias que ya teníamos.
+ *
+ * Se compara por huella y, cuando la fuente lo da, por número de proceso: la huella
+ * incluye el nombre de la entidad, y SECOP lo cambia (el 6-nov-2026 la Gobernación
+ * pasó a "GOBERNACION DE CALDAS - Primero la Gente" y se duplicaron 59 procesos).
+ * El número de proceso (CO1.REQ...) no cambia nunca.
  */
 async function soloNuevos(hallazgos: Hallazgo[]): Promise<{ hallazgo: Hallazgo; huella: string }[]> {
   const conHuella = hallazgos.map((hallazgo) => ({ hallazgo, huella: calcularHuella(hallazgo) }));
+  const procesos = conHuella.flatMap(({ hallazgo }) => (hallazgo.numeroProceso ? [hallazgo.numeroProceso] : []));
   const existentes = await prisma.convocatoria.findMany({
-    where: { huella: { in: conHuella.map((h) => h.huella) } },
-    select: { huella: true },
+    where: { OR: [{ huella: { in: conHuella.map((h) => h.huella) } }, { numeroProceso: { in: procesos } }] },
+    select: { huella: true, numeroProceso: true },
   });
-  const vistas = new Set(existentes.map((e) => e.huella));
-  return conHuella.filter(({ huella }) => (vistas.has(huella) ? false : (vistas.add(huella), true)));
+  return filtrarNuevos(conHuella, existentes);
 }
 
 /**

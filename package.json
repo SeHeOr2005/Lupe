@@ -17,7 +17,8 @@
     "elegibilidad:reevaluar": "tsx src/scripts/reevaluar-pendientes.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "docs:export": "tsx src/scripts/exportar-openapi.ts"
+    "docs:export": "tsx src/scripts/exportar-openapi.ts",
+    "convocatorias:duplicados": "tsx src/scripts/limpiar-duplicados.ts"
   },
   "keywords": [],
   "author": "",

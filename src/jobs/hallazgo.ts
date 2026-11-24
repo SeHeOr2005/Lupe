@@ -55,3 +55,22 @@ export function nombreSiEsOrganizacion(titulo: string): string | undefined {
   if (!TITULO_ES_UNA_ORGANIZACION.test(titulo.trim()) || t.split(/\s+/).length > 12) return undefined;
   return t;
 }
+
+/**
+ * De los hallazgos de un escaneo, los que no están ya guardados ni repetidos en el
+ * mismo escaneo: coincide la huella o, si hay, el número de proceso.
+ */
+export function filtrarNuevos<T extends { hallazgo: Hallazgo; huella: string }>(
+  candidatos: T[],
+  existentes: { huella: string; numeroProceso: string | null }[],
+): T[] {
+  const huellas = new Set(existentes.map((e) => e.huella));
+  const procesos = new Set(existentes.flatMap((e) => (e.numeroProceso ? [e.numeroProceso] : [])));
+  return candidatos.filter(({ hallazgo, huella }) => {
+    const proceso = hallazgo.numeroProceso;
+    if (huellas.has(huella) || (proceso && procesos.has(proceso))) return false;
+    huellas.add(huella);
+    if (proceso) procesos.add(proceso);
+    return true;
+  });
+}
